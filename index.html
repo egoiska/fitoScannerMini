@@ -106,6 +106,7 @@
   .aliaswarn{background:var(--panel2); border:1px solid var(--line2); border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:13px; line-height:1.45; color:var(--tx-mut)}
   .aliaswarn b{color:var(--tx)}
   .aliaswarn .tecleado{font-style:italic}
+  .detmsg{font-size:12.5px; color:var(--tx-mut); background:var(--bg); border:1px solid var(--line); border-radius:9px; padding:9px 11px; margin-top:10px}
 
   .empty{color:var(--tx-mut); text-align:center; padding:34px 10px; font-size:14px}
   .empty .big{font-size:34px; margin-bottom:8px; opacity:.5}
@@ -441,6 +442,46 @@ function aliasMatch(rec, val, terms){
   return parcial;
 }
 
+/* ---- Capa 3: detalle de usos (bajo demanda, NUNCA precacheado) ----------------
+   El JSON del MAPA (~48 MB) se trocea en /detalle/<nreg>.json. Solo existen los
+   productos autorizados: un 404 significa «sin usos publicados», no un error.
+   El service worker guarda lo descargado en el caché 'fitos-detalle', así que un
+   producto ya consultado se ve sin conexión. El veredicto no depende de esto. */
+function tieneDetallePosible(rec){
+  // El fichero solo existe para autorizados; en cancelados/retirados ni se intenta.
+  return norm(getVal(rec,'origen')).indexOf('autoriz')!==-1;
+}
+function fetchDetalle(nreg){
+  return fetch('detalle/'+encodeURIComponent(nreg)+'.json').then(function(r){
+    if(!r.ok) return null;                    // 404 = producto sin usos publicados
+    return r.json();
+  }).catch(function(){ return null; });       // sin red y no cacheado
+}
+function detMsg(txt){ return '<div class="detmsg">'+esc(txt)+'</div>'; }
+
+var detToken=0;   // evita que un detalle lento se pinte sobre una ficha posterior
+function pintarDetalle(rec){
+  var box=$('#detBox'); if(!box) return;
+  var mio=++detToken;
+  if(!tieneDetallePosible(rec)){
+    box.innerHTML=renderDetalle(rec)+detMsg('Los usos autorizados no están disponibles para productos cancelados o retirados.');
+    return;
+  }
+  var n=normNreg(getVal(rec,'nreg'));
+  if(!n) return;
+  fetchDetalle(n).then(function(det){
+    if(mio!==detToken) return;                // el usuario ya abrió otra ficha
+    if(!det){
+      box.innerHTML=renderDetalle(rec)+detMsg('Detalle de usos disponible con conexión.');
+      return;
+    }
+    var merged={}, k;
+    for(k in rec) merged[k]=rec[k];
+    for(k in det){ if(k!=='nreg') merged[k]=det[k]; }
+    box.innerHTML=renderDetalle(merged, rec);  // el JSON crudo sigue siendo el del registro
+  });
+}
+
 function buildIndex(){
   RECS_BY_NREG={};
   INDEX=CATALOG.map(function(rec){
@@ -640,13 +681,14 @@ function showVerdict(rec, alias){
   if(fv) html+=kvRow('Límite de venta', fmtDate(parseDate(fv)), true);
   if(fu) html+=kvRow('Límite de uso', fmtDate(parseDate(fu)), true);
   var nu=countUsos(rec); if(nu) html+=kvRow('Usos autorizados', nu+' (cultivo/agente)');
-  html+='</dl>'+renderDetalle(rec)+'</div></div>';
+  html+='</dl><div id="detBox">'+renderDetalle(rec)+'</div></div></div>';
   html+='<div class="noteform"><label for="note">Nota de la comprobación (cantidad de botes, lote, ubicación…)</label>'+
         '<input id="note" placeholder="p. ej. 3 botes · estante B · lote 2231">'+
         '<div id="photoPrev" class="photoprev"></div>'+
         '<div class="acts"><label class="btn ghost" id="photoBtn" for="photoInput">📷 Foto</label><button class="btn" id="addLogBtn">Añadir al registro</button></div></div>';
   area.innerHTML=html; $('#searchHint').textContent='';
   $('#backBtn').onclick=function(){ runSearch($('#q').value); };
+  pintarDetalle(rec);          // el veredicto ya está pintado; el detalle llega después
   renderPhotoPrev();
   $('#addLogBtn').onclick=function(){ addLog({nreg:getVal(rec,'nreg')||'—', nombre:getVal(rec,'nombre')||'(sin nombre)', titular:getVal(rec,'titular')||'', estado:v.estado, clase:v.clase, decisive:v.decisive?fmtDate(v.decisive):'', note:($('#note').value||'').trim()}, false); };
   window.scrollTo({top:0,behavior:'smooth'});
@@ -706,7 +748,9 @@ function getOtros(rec){
   }
   return rows;
 }
-function renderDetalle(rec){
+/* recRaw: objeto a volcar en «Datos técnicos (JSON)». Cuando se ha inyectado el
+   detalle de Capa 3, se pasa el registro original para no volcar cientos de usos. */
+function renderDetalle(rec, recRaw){
   var comp=getComposicion(rec), usos=getUsos(rec), cond=getCondicionamiento(rec), otros=getOtros(rec);
   var parts=[];
   if(comp){
@@ -735,7 +779,7 @@ function renderDetalle(rec){
   }
   if(cond){ parts.push('<div class="detsec"><h4>Condicionamiento</h4><p class="cond">'+esc(cond).replace(/\r\n|\r|\n/g,'<br>')+'</p></div>'); }
   if(!parts.length) return '';
-  var raw='<details class="rawjson"><summary>Datos técnicos (JSON)</summary><pre>'+esc(JSON.stringify(rec,null,2))+'</pre></details>';
+  var raw='<details class="rawjson"><summary>Datos técnicos (JSON)</summary><pre>'+esc(JSON.stringify(recRaw||rec,null,2))+'</pre></details>';
   return '<details class="raw"><summary>Ficha del producto</summary>'+parts.join('')+raw+'</details>';
 }
 
