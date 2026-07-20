@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#14181c">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fitos">
+<link rel="apple-touch-icon" href="icon-180.png">
 <title>Almacén Fitos · Comprobación de vigencia</title>
 <style>
   :root{
@@ -780,6 +786,9 @@ $('#btnTheme').onclick=function(){ applyTheme(document.body.classList.contains('
 loadLog();
 tryAutoLoad();
 })();
+</script>
+<script>
+if('serviceWorker' in navigator){ addEventListener('load', function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); }); }
 </script>
 </body>
 </html>
