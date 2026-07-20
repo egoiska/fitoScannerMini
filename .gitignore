@@ -1,0 +1,9 @@
+# Descargas del MAPA: pesadas y regenerables. No se publican.
+fuentes/
+
+# Salida de repaso manual del cruce de alias (no la consume la PWA).
+alias_dudosos.csv
+
+# Artefactos de Python y muestras de desarrollo.
+__pycache__/
+scripts/alias_muestra_*.json

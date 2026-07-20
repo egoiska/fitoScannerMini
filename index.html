@@ -102,6 +102,10 @@
   .dot.vig{background:var(--vig)} .dot.uso{background:var(--uso)} .dot.ret{background:var(--ret)} .dot.unk{background:var(--unk)}
   .orig{display:inline-block; font-size:9.5px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; padding:1px 6px; border-radius:5px; vertical-align:middle}
   .orig.vig{background:var(--vig-bg); color:var(--vig)} .orig.uso{background:var(--uso-bg); color:var(--uso)} .orig.ret{background:var(--ret-bg); color:var(--ret)} .orig.unk{background:var(--unk-bg); color:var(--unk)}
+  .orig.ali{background:var(--unk-bg); color:var(--unk)}
+  .aliaswarn{background:var(--panel2); border:1px solid var(--line2); border-radius:10px; padding:10px 12px; margin:0 0 12px; font-size:13px; line-height:1.45; color:var(--tx-mut)}
+  .aliaswarn b{color:var(--tx)}
+  .aliaswarn .tecleado{font-style:italic}
 
   .empty{color:var(--tx-mut); text-align:center; padding:34px 10px; font-size:14px}
   .empty .big{font-size:34px; margin-bottom:8px; opacity:.5}
@@ -375,9 +379,76 @@ function compositionSubstances(rec){
 }
 function countUsos(rec){ for(var k in rec){ if(normKey(k)==='usos' && Array.isArray(rec[k])) return rec[k].length; } return 0; }
 
+/* ---- Capa 2: alias (denominaciones comunes DC / importaciones paralelas IP) ----
+   Los alias se inyectan en el mismo índice de búsqueda que los campos oficiales,
+   así la coincidencia por subcadena y multi-término sale gratis del mecanismo
+   existente y el producto nunca se duplica en la lista de resultados. */
+var ALIAS_LIST=[], ALIAS_EXACT={}, ALIAS_BY_NREG={}, RECS_BY_NREG={};
+function normNreg(s){ return String(s==null?'':s).replace(/[^A-Za-z0-9]/g,'').toUpperCase(); }
+function normAlias(s){ return String(s==null?'':s).replace(/\s+/g,' ').trim().toUpperCase(); }
+
+function cargarAlias(){
+  return fetch('alias.json', {cache:'no-cache'}).then(function(r){
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.text();
+  }).then(function(txt){
+    if(txt&&txt.charCodeAt(0)===0xFEFF) txt=txt.slice(1);
+    var arr=extractArray(JSON.parse(txt));
+    ALIAS_LIST=[]; ALIAS_EXACT={}; ALIAS_BY_NREG={};
+    arr.forEach(function(a){
+      if(!a||!a.alias||!a.nreg) return;
+      ALIAS_LIST.push(a);
+      var ka=normAlias(a.alias); if(!(ka in ALIAS_EXACT)) ALIAS_EXACT[ka]=a;
+      var kn=normNreg(a.nreg); (ALIAS_BY_NREG[kn]||(ALIAS_BY_NREG[kn]=[])).push(a);
+    });
+    return ALIAS_LIST.length;
+  }).catch(function(){ return 0; });   // sin alias.json: la búsqueda sigue como hoy
+}
+
+function aliasesDe(rec){ return ALIAS_BY_NREG[normNreg(getVal(rec,'nreg'))]||[]; }
+function productoPorNreg(nreg){ return RECS_BY_NREG[normNreg(nreg)]||null; }
+
+/* Devuelve el alias por el que este producto casa con lo tecleado, o null.
+   Prioriza el acierto exacto sobre la subcadena.
+   Un alias igual al nombre oficial del registro NO es un alias: si se marcase como
+   tal, buscar un producto por su propio nombre lo mostraría como DC/IP. El script
+   ya los descarta; esto es la defensa por si el JSON viniese sucio. */
+function aliasMatch(rec, val, terms){
+  var list=aliasesDe(rec); if(!list.length) return null;
+  var nomRaw=getVal(rec,'nombre')||'', nom=norm(nomRaw), nreg=norm(getVal(rec,'nreg')||'');
+  // 1) El nombre oficial exacto manda: buscar «closer» es buscar CLOSER, no un alias.
+  if(normAlias(val)===normAlias(nomRaw)) return null;
+  var exacto=normAlias(val), parcial=null;
+  for(var i=0;i<list.length;i++){
+    var a=list[i];
+    if(norm(a.alias)===nom) continue;                   // autorreferencia: no es alias
+    if(normAlias(a.alias)===exacto) return {a:a, exact:true};   // 2) alias exacto: sí avisa
+    if(!parcial){
+      var hay=norm(a.alias), ok=true;
+      for(var t=0;t<terms.length;t++){ if(hay.indexOf(terms[t])===-1){ ok=false; break; } }
+      if(ok) parcial={a:a, exact:false};
+    }
+  }
+  // 3) Coincidencia solo parcial: si el nombre o el nº oficial ya explican lo tecleado,
+  //    el producto sale por sí mismo y no debe marcarse (p. ej. «closer» vs CLOSERFLOR RO).
+  if(parcial){
+    var explicado=true;
+    for(var k=0;k<terms.length;k++){
+      if(nom.indexOf(terms[k])===-1 && nreg.indexOf(terms[k])===-1){ explicado=false; break; }
+    }
+    if(explicado) return null;
+  }
+  return parcial;
+}
+
 function buildIndex(){
+  RECS_BY_NREG={};
   INDEX=CATALOG.map(function(rec){
+    var kn=normNreg(getVal(rec,'nreg'));
+    if(kn && !(kn in RECS_BY_NREG)) RECS_BY_NREG[kn]=rec;
     var parts=[getVal(rec,'nombre'),getVal(rec,'nreg'),getVal(rec,'titular'),getVal(rec,'sustancia')].concat(compositionSubstances(rec));
+    var als=ALIAS_BY_NREG[kn];
+    if(als) for(var i=0;i<als.length;i++) parts.push(als[i].alias);
     return {rec:rec, hay:norm(parts.filter(Boolean).join(' '))};
   });
 }
@@ -451,11 +522,18 @@ function ingest(records){
 function tryAutoLoad(){
   if(location.protocol==='file:') return;           // en local el fetch de ficheros no está permitido
   setStatus('Cargando registro publicado…', false);
-  fetch('registro.json', {cache:'no-store'}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); }).then(function(txt){
+  var pReg=fetch('registro.json', {cache:'no-store'}).then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.text(); }).then(function(txt){
     if(txt&&txt.charCodeAt(0)===0xFEFF) txt=txt.slice(1);
     var arr=extractArray(JSON.parse(txt));
     if(!arr.length) throw new Error('vacío');
-    ingest(arr); setStatus('', false); toast(arr.length+' productos cargados');
+    return arr;
+  });
+  // Los alias se cargan en paralelo y nunca hacen fallar la carga del registro:
+  // cargarAlias() resuelve a 0 si alias.json no existe o no es válido.
+  Promise.all([pReg, cargarAlias()]).then(function(res){
+    var arr=res[0];
+    ingest(arr); setStatus('', false);
+    toast(arr.length+' productos cargados'+(res[1]?(' · '+res[1]+' alias'):''));
   }).catch(function(){ setStatus('', false); });    // si no hay registro.json, se queda la carga manual
 }
 function setStatus(msg,isError){ var s=$('#loadStatus'); if(!s) return; s.textContent=msg||''; s.className='loadstatus'+(isError?' err':'')+(msg?' show':''); }
@@ -505,8 +583,17 @@ function runSearch(val){
   for(var i=0;i<INDEX.length;i++){
     var hay=INDEX[i].hay, ok=true;
     for(var t=0;t<terms.length;t++){ if(hay.indexOf(terms[t])===-1){ok=false;break;} }
-    if(ok){ var nreg=norm(getVal(INDEX[i].rec,'nreg')), nom=norm(getVal(INDEX[i].rec,'nombre'));
-      out.push({rec:INDEX[i].rec, score: nreg===q?0:(nreg.indexOf(q)===0?1:(nom.indexOf(q)===0?2:3))}); }
+    if(ok){ var rec=INDEX[i].rec, nreg=norm(getVal(rec,'nreg')), nom=norm(getVal(rec,'nombre'));
+      // ¿casa por alias? (exacto manda sobre subcadena; el nº de registro exacto sigue primero)
+      var am=aliasMatch(rec, val, terms);
+      var sc;
+      if(nreg===q) sc=0;
+      else if(am && am.exact) sc=1;
+      else if(nreg.indexOf(q)===0) sc=2;
+      else if(nom.indexOf(q)===0) sc=3;
+      else if(am) sc=4;
+      else sc=5;
+      out.push({rec:rec, score:sc, alias:am?am.a:null}); }
     if(out.length>500) break;
   }
   out.sort(function(a,b){return a.score-b.score;});
@@ -518,17 +605,25 @@ function runSearch(val){
   }
   area.innerHTML=''; var list=el('div','results');
   out.slice(0,40).forEach(function(o){ var v=evaluar(o.rec); var oi=origenInfo(o.rec); var row=el('button','row');
+    var ali=o.alias? '<div class="sub">↳ '+esc(o.alias.alias)+' <span class="orig ali">'+(o.alias.tipo==='IP'?'Imp. paralela':'Denom. común')+'</span></div>' : '';
     row.innerHTML='<span class="dot '+v.clase+'"></span><span class="info"><div class="nom">'+esc(getVal(o.rec,'nombre')||'(sin nombre)')+'</div>'+
-      '<div class="sub"><span class="mono">'+esc(getVal(o.rec,'nreg')||'—')+'</span>'+(getVal(o.rec,'titular')?' · '+esc(getVal(o.rec,'titular')):'')+(oi?' <span class="orig '+oi.cls+'">'+esc(oi.txt)+'</span>':'')+'</div></span>';
-    row.onclick=function(){ showVerdict(o.rec); }; list.appendChild(row);
+      '<div class="sub"><span class="mono">'+esc(getVal(o.rec,'nreg')||'—')+'</span>'+(getVal(o.rec,'titular')?' · '+esc(getVal(o.rec,'titular')):'')+(oi?' <span class="orig '+oi.cls+'">'+esc(oi.txt)+'</span>':'')+'</div>'+ali+'</span>';
+    row.onclick=function(){ showVerdict(o.rec, o.alias); }; list.appendChild(row);
   });
   area.appendChild(list);
 }
 
-function showVerdict(rec){
+function showVerdict(rec, alias){
   var v=evaluar(rec); var area=$('#resultsArea'); pendingPhoto=null;
   var icon={vig:'✓',uso:'⏳',ret:'✕',unk:'?'}[v.clase];
   var html='<button class="back" id="backBtn">‹ Volver a resultados</button>';
+  if(alias){
+    // El nombre y el nº se toman del registro, no del PDF: los nombres del PDF traen
+    // erratas de exportación (p. ej. «COTTONEX 5O SC», con letra O en vez de cero).
+    html+='<div class="aliaswarn">Encontrado como <b>'+(alias.tipo==='IP'?'importación paralela':'denominación común')+'</b> '+
+          '<span class="tecleado">«'+esc(alias.alias)+'»</span> → producto oficial: <b>'+esc(getVal(rec,'nombre')||alias.oficial||'—')+'</b> '+
+          '(nº registro '+esc(getVal(rec,'nreg')||alias.nreg)+'). Abajo, la situación del producto oficial.</div>';
+  }
   html+='<div class="veredicto"><div class="v-head v-'+v.clase+'">';
   html+='<div class="estado"><span class="ic">'+icon+'</span><span class="big">'+esc(v.estado)+'</span></div>';
   html+='<div class="msg">'+esc(v.msg)+'</div>';

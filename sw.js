@@ -1,11 +1,12 @@
 /* Almacén Fitos — service worker
    Sube una versión nueva (cambia CACHE) cuando actualices index.html o sw.js.
-   registro.json se actualiza solo con estrategia stale-while-revalidate. */
-var CACHE = 'fitos-v1';
+   registro.json y alias.json se actualizan solos con estrategia stale-while-revalidate. */
+var CACHE = 'fitos-v2';
 var CORE = [
   './',
   './index.html',
   './registro.json',
+  './alias.json',
   './manifest.webmanifest',
   './icon-180.png',
   './icon-192.png',
@@ -15,7 +16,11 @@ var CORE = [
 
 self.addEventListener('install', function(e){
   self.skipWaiting();
-  e.waitUntil(caches.open(CACHE).then(function(c){ return c.addAll(CORE).catch(function(){}); }));
+  // Precache recurso a recurso: addAll() es atómico y un solo 404 (p. ej. alias.json
+  // aún no publicado) dejaría la app sin nada cacheado y sin offline.
+  e.waitUntil(caches.open(CACHE).then(function(c){
+    return Promise.all(CORE.map(function(u){ return c.add(u).catch(function(){}); }));
+  }));
 });
 
 self.addEventListener('activate', function(e){
