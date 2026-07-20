@@ -20,6 +20,9 @@ Uso:
 
 import argparse, glob, json, os, re, shutil, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fuentes_comun import avisar_desincronizacion
+
 # Campos de USOS[i] que se publican, en el orden en que se escriben.
 USO_CAMPOS = [
     "Cultivo", "Agente",
@@ -128,6 +131,11 @@ def main():
         print(f"  sin nada que mostrar: {sin_usos}")
     print(f"  peso total        : {peso/1048576:.1f} MB  (media {peso/max(escritos,1)/1024:.1f} KB)")
     print(f"  -> {outdir}")
+
+    # El detalle sale del JSON grande, pero el registro sale de los XLSX: si no son
+    # de la misma descarga aparecen productos sin detalle o detalle inalcanzable.
+    otras = sorted(glob.glob(os.path.join(args.src, "Productos*.xlsx")))
+    avisar_desincronizacion([src] + otras, "fuentes del MAPA")
 
 
 if __name__ == "__main__":

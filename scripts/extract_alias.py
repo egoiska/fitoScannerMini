@@ -25,6 +25,9 @@ Diagnostico: python extract_alias.py --src ./fuentes --report ip   # mapear colu
 """
 import argparse, csv, glob, json, os, re, sys, unicodedata
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fuentes_comun import avisar_desincronizacion
+
 try:
     import pdfplumber
 except ImportError:
@@ -232,7 +235,7 @@ def report_columns(pdf_path, tipo):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--src", default=".", help="carpeta con dc_web*.pdf / ip_web*.pdf / registro.json")
-    ap.add_argument("--register", default=None, help="ruta a registro.json (por defecto <src>/registro.json)")
+    ap.add_argument("--register", default=None, help="ruta a registro.json (por defecto se busca en <out>/, <src>/ y la raiz)")
     ap.add_argument("--out", default=".", help="carpeta de salida para alias.json / alias_dudosos.csv")
     ap.add_argument("--report", choices=["dc", "ip"], help="solo diagnostico de columnas, no genera nada")
     args = ap.parse_args()
@@ -247,9 +250,21 @@ def main():
         report_columns(path, args.report.upper())
         return
 
-    reg_path = args.register or os.path.join(args.src, "registro.json")
-    if not os.path.exists(reg_path):
-        sys.exit(f"No encuentro registro.json en {reg_path}")
+    # Sin --register se busca donde lo deja unificar.py: primero la raiz del sitio
+    # (--out, que es donde se publica), luego la carpeta de fuentes.
+    if args.register:
+        reg_path = args.register
+        if not os.path.exists(reg_path):
+            sys.exit(f"No encuentro registro.json en {reg_path}")
+    else:
+        candidatos = [os.path.join(args.out, "registro.json"),
+                      os.path.join(args.src, "registro.json"),
+                      "registro.json"]
+        reg_path = next((p for p in candidatos if os.path.exists(p)), None)
+        if not reg_path:
+            sys.exit("No encuentro registro.json (buscado en: %s). "
+                     "Ejecuta antes unificar.py o pasa --register."
+                     % ", ".join(candidatos))
 
     reg_set, name_index, k_nreg, k_name = load_register(reg_path)
     print(f"registro.json: {len(reg_set)} nº unicos (clave nº='{k_nreg}', nombre='{k_name}')")
@@ -293,6 +308,11 @@ def main():
               "-> revisar esas paginas (¿PDF sin bordes / reexportado?)")
     print(f"  -> {ap_path}")
     print(f"  -> {dp_path}")
+
+    # Los PDF de alias no llevan fecha en el nombre; se comprueba que las hojas del
+    # MAPA presentes en la misma carpeta sean de una unica descarga.
+    avisar_desincronizacion(sorted(glob.glob(os.path.join(args.src, "Productos*"))),
+                            "fuentes del MAPA")
 
 if __name__ == "__main__":
     main()

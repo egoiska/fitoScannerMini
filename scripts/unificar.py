@@ -22,6 +22,9 @@ Uso:
 
 import argparse, datetime, glob, json, os, re, sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from fuentes_comun import avisar_desincronizacion
+
 try:
     import openpyxl
 except ImportError:
@@ -170,11 +173,13 @@ def main():
     por_nreg = {}          # nreg normalizado -> registro elegido
     leidos = {}
     descartes = []         # (nreg, origen_descartado, origen_ganador)
+    usados = []            # rutas de las fuentes, para el aviso de desfase
 
     for prefijo, origen, mapper in LISTADOS:
         path = find_by_prefix(args.src, prefijo)
         if not path:
             sys.exit("No encuentro %s*.xlsx en %s" % (prefijo, args.src))
+        usados.append(path)
         _, filas = leer_xlsx(path)
         leidos[origen] = len(filas)
         print("%-14s %-45s %5d filas" % (origen, os.path.basename(path), len(filas)))
@@ -225,6 +230,7 @@ def main():
         print("    %s: descarta %s (cad. %s) -> gana %s (cad. %s)"
               % (n, o_p, f_p or "—", o_g, f_g or "—"))
     print("  -> %s  (%.1f MB)" % (out, os.path.getsize(out) / 1048576))
+    avisar_desincronizacion(usados, "hojas XLSX del MAPA")
 
 
 if __name__ == "__main__":
