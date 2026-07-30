@@ -195,50 +195,66 @@ Comportamiento:
 El docstring de `fuentes_comun.py`, que hoy explica el desfase entre fuentes pero no
 este fallo, se amplía.
 
-### B.3 El aviso de desfase compara tandas, no fechas
+### B.3 El aviso de desfase mira cuándo se descargó, no el nombre
 
-El MAPA publica **los viernes**. Cada fuente lleva en el nombre una fecha, pero no
-todas significan lo mismo:
+La fecha del nombre no sirve para detectar el desfase, porque **cada fuente fecha
+una cosa distinta**:
 
-| Fuente | Ejemplo | Día de la semana | Qué fecha es |
-|---|---|---|---|
-| Los tres XLSX | `-20_07_2026` | lunes | la de **descarga** |
-| El JSON grande | `_2026_07_17` | viernes | la de **publicación** |
+| Fuente | Ejemplos observados | Qué fecha es |
+|---|---|---|
+| Los tres XLSX | `-20_07_2026`, `-30_07_2026` | la de **descarga** |
+| El JSON grande | `_2026_07_17`, `_2026_07_27` | la del **volcado del MAPA** |
+| Los dos PDF | `dc_web.pdf` | ninguna: nombre fijo |
 
-O sea que el desfase de tres días entre las fuentes actuales no es un descuido: es
-estructural. Salvo que se descargue en viernes, las fechas nunca coincidirán, y
-`avisar_desincronizacion()` saltaría en casi todas las generaciones. Un aviso que
-salta siempre se aprende a ignorar, y entonces deja de proteger del caso en que el
-desfase sí es real.
+Las dos descargas disponibles dan un JSON tres días anterior al XLSX en ambos casos
+(17→20 y 27→30), pero en días de la semana distintos: el 17 fue viernes y el 27
+lunes. Con dos muestras no hay regla de calendario que sostener. Lo único firme es
+que el JSON va sistemáticamente por detrás, y que el desfase de fechas entre fuentes
+es **estructural**: `avisar_desincronizacion()`, comparando nombres, saltaría en casi
+todas las generaciones. Un aviso que salta siempre se aprende a ignorar, y entonces
+deja de proteger del caso en que el desfase sí es real.
 
-La comparación pasa a hacerse por **tanda semanal**: la tanda de una fuente es el
-viernes anterior o igual a la fecha de su nombre. Hay desfase cuando las fuentes
-pertenecen a tandas distintas, no cuando sus fechas difieren.
+El JSON tampoco trae metadatos internos de generación —su estructura es solo
+`{"Productos":[…]}`— así que no hay una fecha mejor escondida dentro.
 
-- JSON del viernes 17 y XLSX del lunes 20 → los dos son de la tanda del 17. No
-  avisa, y es correcto: contienen los mismos datos.
-- XLSX descargados el jueves 23 (tanda del 17) y JSON de la tanda del 24 → tandas
-  distintas. Avisa, y es correcto: hay un lote de diferencia.
+Lo que el aviso quiere saber en realidad no es de qué día son los datos, sino **si
+las fuentes se bajaron todas en la misma sesión**. Y eso está en la fecha de
+modificación del fichero. En las descargas actuales se ve limpio: las cuatro nuevas
+entre las 08:56 y las 08:58 de hoy, las anteriores el 20/07 por la mañana.
 
-Una tolerancia de N días no serviría: con tolerancia de tres días el primer caso
-saldría bien pero el segundo, que difiere en un solo día y sí es un desfase real,
-pasaría desapercibido.
+Así que `avisar_desincronizacion()` pasa a comparar `mtime`: avisa si las fuentes
+usadas no se descargaron dentro de la misma ventana, con `VENTANA_DESCARGA_H = 24`
+como constante documentada. Ventajas sobre el criterio del nombre:
 
-El día de publicación se escribe como constante con nombre en `fuentes_comun.py`
-(`DIA_PUBLICACION`, lunes = 0), documentada, para que si el MAPA se pasa a otro día
-el ajuste sea una línea. Cuando el aviso salta, muestra la tanda de cada fuente
-además de su fecha, porque si no la advertencia resulta incomprensible.
+- No hay que modelar tres nomenclaturas distintas ni suponer nada sobre el
+  calendario de publicación del MAPA.
+- **Los dos PDF entran en el control sin renombrarlos**, que es justo lo que el
+  nombre fijo impedía. Desaparece un paso manual del flujo (ver B.4).
 
-### B.4 Los PDF entran en el control de frescura
+Limitación, que se documenta en el aviso y en el doc de la parte C: el `mtime` se
+altera al copiar o mover ficheros entre carpetas, así que puede dar un falso
+positivo si reorganizas `fuentes/` a mano. Para que se distinga de un vistazo, el
+aviso lista cada fuente con su fecha de descarga y marca la descolgada. Como red
+secundaria se mantiene la comparación por nombre, pero solo salta cuando la
+diferencia supera una semana, que ya no se explica por el desfase estructural.
 
-`dc_web.pdf` e `ip_web.pdf` se descargan de una URL fija y sin fecha en el nombre,
-así que hoy quedan fuera de toda vigilancia: `fecha_de_fuente()` no los reconoce y
-`avisar_desincronizacion()` no los compara nunca con los XLSX.
+### B.4 Los PDF, sin renombrar
 
-Se resuelve sin tocar código, solo con la convención que documenta la parte C:
-renombrarlos al descargar a `dc_web_AAAA_MM_DD.pdf` e `ip_web_AAAA_MM_DD.pdf`. El
-prefijo sigue casando con `elegir_fuente()`, y el patrón ISO de `fecha_de_fuente()`
-reconoce ese sufijo, de modo que los PDF empiezan a contar para el aviso de desfase.
+`dc_web.pdf` e `ip_web.pdf` se descargan de una URL fija y siempre con el mismo
+nombre, sin fecha. Hoy quedan fuera de toda vigilancia: `fecha_de_fuente()` no los
+reconoce y `avisar_desincronizacion()` no los compara nunca con los XLSX.
+
+Con el criterio de B.3 quedan cubiertos sin tocar nada: su `mtime` dice cuándo se
+bajaron, igual que el de cualquier otra fuente. **No hay que renombrarlos**, que era
+la alternativa manual y olvidable.
+
+La contrapartida es que descargarlos sobrescribe los anteriores y no queda copia de
+la versión previa. Es aceptable —los alias no son datos de los que haga falta
+histórico— y lo cubre el paso de mover las fuentes viejas a `fuentes/historico/` de
+la parte C, para quien quiera conservarlas.
+
+En `elegir_fuente()` esto se traduce en que, cuando una candidata no tiene fecha en
+el nombre, se ordena por `mtime` en lugar de por nombre.
 
 ---
 
@@ -256,14 +272,15 @@ quien lo lee recuerda cómo funciona el pipeline.
      <https://www.mapa.gob.es/dam/mapa/contenido/agricultura/temas/sanidad-vegetal/medios-de-defensa-fitosanitaria/registro-productos-fitosanitarios/dc_web.pdf>
    - Alias de importaciones paralelas: la misma ruta con `ip_web.pdf`.
 
-2. **Cómo nombrarlas.** La tabla de los seis ficheros con el nombre que espera cada
-   script, señalando que los XLSX y el JSON ya vienen con fecha del MAPA y los dos
-   PDF llegan siempre con el mismo nombre y hay que renombrarlos a mano según B.4.
+2. **Cómo llegan.** La tabla de los seis ficheros con el nombre que trae cada uno,
+   advirtiendo de que **no hay que renombrar nada**: los XLSX y el JSON ya vienen
+   fechados por el MAPA, y los dos PDF llegan siempre con el mismo nombre y quedan
+   controlados por su fecha de descarga.
 
-   **Cuándo descargar.** El MAPA publica los viernes, así que lo natural es
-   descargar en viernes o sábado: se coge la tanda recién publicada y las fechas de
-   todas las fuentes caen en la misma. Descargar un jueves significa llevarse datos
-   de casi una semana antes y tener que repetir el proceso al día siguiente.
+   **Descárgalo todo en la misma sesión.** Es la única regla que importa, y de la
+   que depende el aviso de la parte B. Las fechas de los nombres no coinciden entre
+   sí ni tienen por qué: el JSON viene fechado unos días antes que los XLSX porque
+   es la fecha del volcado del MAPA, no la de la descarga.
 
 3. **Qué hacer con las viejas.** Moverlas a `fuentes/historico/` antes de descargar
    las nuevas, para que en `fuentes/` haya siempre un único juego. Con el arreglo de
@@ -276,6 +293,11 @@ quien lo lee recuerda cómo funciona el pipeline.
    duplicados descartados, el aviso de desincronización, el número de alias y el de
    ficheros de detalle. Con los valores de la última generación como referencia de
    qué es normal.
+
+   Con una advertencia: **que una fuente llegue idéntica a la anterior es normal**.
+   Entre el 20 y el 30 de julio, `ProductosCancelados` se descargó byte a byte igual
+   —los otros dos XLSX sí cambiaron—, así que un recuento que no se mueve no
+   significa que la descarga haya fallado.
 
 6. **Publicar.** Subir la versión de `CACHE` en `sw.js` (hoy `fitos-v3`) para que
    los móviles ya instalados recojan el cambio, y el `git add` / `commit` / `push`.
@@ -292,19 +314,27 @@ ficheros por el nombre con el que llegan, que es lo que los scripts necesitan.
 El repo no tiene framework de test ni proceso de build, así que la comprobación es
 manual y explícita.
 
-**Parte B.** Se ejecuta `unificar.py` con las fuentes reales de `fuentes/` más una
-copia de `ProductosAutorizados-20_07_2026.xlsx` renombrada a una fecha posterior en
-formato `DD_MM_AAAA` que ordene antes alfabéticamente (p. ej. `05_08_2026`). Se
-confirma que elige la copia de agosto, que anuncia la de julio como descartada, y
-que el `registro.json` resultante es idéntico al actual salvo por ese cambio de
-fuente. Después se repite con `dc_web.pdf` sin fecha junto a `dc_web_2026_07_30.pdf`
-y se confirma que `extract_alias.py` elige el fechado y avisa del otro.
+**Parte B.** La carpeta `fuentes/` contiene ya dos juegos completos, del 20 y del 30
+de julio, que es el escenario real que hay que cubrir. Cuatro comprobaciones:
 
-El criterio de tandas se comprueba con las fuentes reales tal como están: JSON del
-viernes 17 y XLSX del lunes 20 deben generar **sin** aviso de desfase, donde hoy sí
-lo dan. Y renombrando un XLSX al jueves 23 —tanda anterior a la del JSON si este
-pasa a ser de la del 24— el aviso debe volver a aparecer, indicando la tanda de cada
-fuente y no solo su fecha.
+1. **Selección correcta.** `elegir_fuente()` debe quedarse con los cuatro ficheros
+   del 30/07 y anunciar los del 20/07 como descartados, con sus fechas.
+2. **El fallo que hoy no se ve.** Este escenario concreto no discrimina: como texto,
+   `20` < `30`, así que el `sorted()[-1]` actual acierta por casualidad. Para probar
+   el arreglo de verdad hace falta una copia de `ProductosAutorizados-30_07_2026.xlsx`
+   renombrada a `05_08_2026`, que ordena *antes* alfabéticamente. El código actual
+   elige la de julio; el arreglado debe elegir la de agosto.
+3. **Aviso por fecha de descarga.** Con las fuentes del 30/07, cuyos `mtime` están
+   todos entre las 08:56 y las 08:58, no debe saltar ningún aviso, pese a que sus
+   nombres lleven tres fechas distintas (`30_07_2026`, `2026_07_27` y los PDF sin
+   fecha). Después se retrasa el `mtime` de una sola fuente diez días y se confirma
+   que el aviso salta señalándola a ella.
+4. **Los PDF cuentan.** El mismo retraso de `mtime` aplicado a `dc_web.pdf` debe
+   hacer saltar el aviso: es lo que hoy no ocurre nunca.
+
+Como red de seguridad de que el arreglo no altera la salida, el `registro.json`
+generado con las fuentes del 20/07 debe ser idéntico byte a byte al que hay
+publicado en el repo.
 
 **Parte A.** Con el `registro.json` publicado cargado en el navegador, se registran
 al menos tres comprobaciones —una sin foto, una de un producto vigente y una de un
