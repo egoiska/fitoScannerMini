@@ -1146,6 +1146,156 @@ git commit -m "docs: procedimiento de actualizacion de las fuentes del MAPA"
 
 ---
 
+### Task 8: El aviso recibe solo las fuentes que se usan
+
+Añadida durante la ejecución, al descubrirse al revisar la Tarea 3. No es un fallo de
+esa tarea —que era una sustitución sin cambio de comportamiento— sino un hueco del
+plan: dos de los tres scripts pasan al aviso ficheros que no son los que
+`elegir_fuente()` selecciona.
+
+| Script | Qué pasa hoy al aviso | |
+|---|---|---|
+| `unificar.py:228` | las tres rutas elegidas | correcto, no se toca |
+| `trocear_detalle.py:132` | el JSON elegido **+ todos** los XLSX de la carpeta | incorrecto |
+| `extract_alias.py:306` | **todos** los `Productos*`, y **ninguno** de los dos PDF que usa | incorrecto |
+
+Dos consecuencias. Con dos lotes en `fuentes/` —el estado normal tras actualizar, y
+el que el arreglo de la Tarea 1 vuelve seguro— el aviso salta siempre: es el falso
+positivo permanente que la Tarea 2 vino a eliminar, reintroducido por otra vía. Y la
+spec B.4, que exige que los PDF de alias entren en el control de frescura, no se
+cumple: con `glob("Productos*")` no entran en ninguna parte.
+
+**Files:**
+- Modify: `scripts/extract_alias.py:303-307`
+- Modify: `scripts/trocear_detalle.py:130-133`
+
+**Interfaces:**
+- Consumes: `elegir_fuente(folder, prefix, exts)` y `avisar_desincronizacion(paths, etiqueta)`, ambas ya implementadas y probadas. **Ninguna de las dos se modifica en esta tarea.**
+- Produces: nada nuevo.
+
+- [ ] **Step 1: Comprobar el falso positivo antes de arreglarlo**
+
+```bash
+cd "C:/Users/Zerbinek SL/Desktop/DESARROLLOS/fitoScannerMini"
+mkdir -p ../fito-pruebas/salida
+python scripts/trocear_detalle.py --src fuentes --out ../fito-pruebas/salida 2>&1 | tail -25
+```
+
+Esperado: sale el bloque de `AVISO` con los `!!!!`, pese a que las fuentes que el
+script elige son todas de la misma descarga. Es el fallo a corregir; anotar la salida
+para el informe.
+
+- [ ] **Step 2: Arreglar `trocear_detalle.py`**
+
+Sustituir las líneas 130-133:
+
+```python
+    # El detalle sale del JSON grande, pero el registro sale de los XLSX: si no son
+    # de la misma descarga aparecen productos sin detalle o detalle inalcanzable.
+    otras = sorted(glob.glob(os.path.join(args.src, "Productos*.xlsx")))
+    avisar_desincronizacion([src] + otras, "fuentes del MAPA")
+```
+
+por:
+
+```python
+    # El detalle sale del JSON grande, pero el registro sale de los XLSX: si no son
+    # de la misma descarga aparecen productos sin detalle o detalle inalcanzable.
+    # Se comparan las fuentes que de verdad se usan, no todo lo que haya en la
+    # carpeta: con dos descargas conviviendo, mirar las descartadas hacia saltar el
+    # aviso siempre, que es justo lo que lo vuelve inutil.
+    otras = [elegir_fuente(args.src, p, [".xlsx"])
+             for p in ("ProductosAutorizados", "ProductosCancelados", "ProductosRetirados")]
+    avisar_desincronizacion([src] + [o for o in otras if o], "fuentes del MAPA")
+```
+
+Comprobar si `glob` sigue usándose en el fichero (`grep -n "glob\." scripts/trocear_detalle.py`) y quitarlo del import solo si no.
+
+- [ ] **Step 3: Arreglar `extract_alias.py`**
+
+Sustituir las líneas 303-307:
+
+```python
+    # Los PDF de alias no llevan fecha en el nombre; se comprueba que las hojas del
+    # MAPA presentes en la misma carpeta sean de una unica descarga.
+    avisar_desincronizacion(sorted(glob.glob(os.path.join(args.src, "Productos*"))),
+                            "fuentes del MAPA")
+```
+
+por:
+
+```python
+    # Los PDF de alias no llevan fecha en el nombre, asi que su unica senal de
+    # frescura es el mtime: por eso entran en la comparacion en lugar de quedarse
+    # fuera, como estaban. El XLSX de autorizados va como referencia de cuando fue
+    # la ultima descarga; se toma el que elegiria cualquier otro paso, no todo lo
+    # que haya en la carpeta.
+    ref = elegir_fuente(args.src, "ProductosAutorizados", [".xlsx"])
+    avisar_desincronizacion([p for p in (dc_pdf, ip_pdf, ref) if p],
+                            "fuentes del MAPA")
+```
+
+Comprobar si `glob` sigue usándose (`grep -n "glob\." scripts/extract_alias.py`) y quitarlo del import solo si no.
+
+- [ ] **Step 4: El falso positivo desaparece**
+
+```bash
+python scripts/trocear_detalle.py --src fuentes --out ../fito-pruebas/salida 2>&1 | tail -12
+python scripts/extract_alias.py --src fuentes --out ../fito-pruebas/salida 2>&1 | tail -12
+```
+
+Esperado: ninguno de los dos imprime el bloque de `AVISO`, y ambos terminan con sus
+recuentos normales (unos 2871 alias y 2062 ficheros de detalle).
+
+- [ ] **Step 5: El aviso verdadero sigue saltando**
+
+Ahora se retrasa a mano el `mtime` de uno de los PDF diez días y se comprueba que el
+aviso vuelve — es lo que la spec B.4 pide y hoy no ocurre nunca:
+
+```bash
+python -c "
+import os, time
+p='fuentes/dc_web.pdf'
+t=time.time()-10*86400
+os.utime(p,(t,t))
+print('mtime de dc_web.pdf retrasado 10 dias')
+"
+python scripts/extract_alias.py --src fuentes --out ../fito-pruebas/salida 2>&1 | tail -20
+```
+
+Esperado: aparece el bloque de `AVISO` señalando `dc_web.pdf` como la más antigua.
+
+Devolver el fichero a su estado real, porque es una fuente de verdad del usuario y no
+un fichero de prueba:
+
+```bash
+python -c "
+import os, time
+p='fuentes/dc_web.pdf'
+t=time.time()
+os.utime(p,(t,t))
+print('mtime de dc_web.pdf restaurado a ahora')
+"
+```
+
+- [ ] **Step 6: Comprobar que el repo no ha cambiado**
+
+```bash
+git status --porcelain
+```
+
+Esperado: sólo los dos `.py` modificados. Si aparecen `registro.json`, `alias.json` o
+`detalle/`, revertir con `git checkout -- <ruta>`.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add scripts/extract_alias.py scripts/trocear_detalle.py
+git commit -m "fix(fuentes): comparar solo las fuentes usadas, con los PDF incluidos"
+```
+
+---
+
 ## Comprobación final
 
 - [ ] `python scripts/tests/test_fuentes_comun.py` → las diez en `ok`
