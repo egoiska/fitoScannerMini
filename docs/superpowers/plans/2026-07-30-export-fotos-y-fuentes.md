@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - **Sin dependencias nuevas.** Ni en Python ni en el navegador. El repo no tiene build ni gestor de paquetes de front, y no se le añade uno.
-- **JavaScript ES5**, el estilo del resto de `index.html`: `var`, `function`, sin arrow functions, sin `const`/`let`, sin plantillas de cadena. El fichero se sirve tal cual a móviles antiguos.
+- **JavaScript ES5 dentro de `index.html`**, el estilo del resto del fichero: `var`, `function`, sin arrow functions, sin `const`/`let`, sin plantillas de cadena. Se sirve tal cual a móviles antiguos. **Esta restricción no alcanza a `scripts/tests/*.mjs`**, que se ejecutan en Node 24 y nunca llegan al navegador: ahí la sintaxis moderna es correcta y preferible.
 - **Todo el JS va dentro de `index.html`**, en el IIFE existente. No se crean ficheros `.js` nuevos: `sw.js` tendría que precachearlos.
 - **Los textos de interfaz van en español con acentos correctos**, igual que el resto de la app.
 - **Comentarios en español**, explicando el *porqué* y no el *qué*, siguiendo el estilo del código existente (ver los comentarios de las capas 2 y 3 en `index.html`).
