@@ -211,6 +211,11 @@
   .viewer.show{display:flex}
   .viewer img{max-width:94vw; max-height:88vh; border-radius:10px}
   .viewer .vclose{position:absolute; top:calc(12px + env(safe-area-inset-top)); right:14px; border:none; background:rgba(255,255,255,.16); color:#fff; width:42px; height:42px; border-radius:50%; font-size:18px}
+  .expopt{display:block; width:100%; text-align:left; background:var(--panel2); color:var(--tx);
+    border:1px solid var(--line2); border-radius:11px; padding:12px 14px; margin-bottom:8px}
+  .expopt:active{background:var(--panel)}
+  .expopt b{display:block; font-size:15px; font-weight:700}
+  .expopt span{display:block; font-size:12.5px; color:var(--tx-mut); margin-top:2px}
   @media (min-width:560px){ .modal{align-items:center} .sheet{border-radius:16px; border-bottom:1px solid var(--line2)} }
   @media (prefers-reduced-motion:reduce){ *{transition:none!important} .spin{animation:none} }
   .vfile{position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0}
@@ -256,8 +261,7 @@
   <section class="view" id="logView">
     <div class="summary" id="summary"></div>
     <div class="logactions">
-      <button class="btn ghost sm" id="expCsv">Exportar CSV</button>
-      <button class="btn ghost sm" id="expJson">Exportar JSON</button>
+      <button class="btn ghost sm" id="btnExport">Exportar</button>
       <button class="btn ghost sm" id="clearLog" style="color:var(--ret)">Vaciar</button>
     </div>
     <div id="logList"></div>
@@ -275,6 +279,17 @@
     <p class="d">Si la detección automática no acierta con tu JSON, indica qué clave corresponde a cada dato.</p>
     <div id="mapRows"></div>
     <div class="closeacts"><button class="btn ghost" id="mapCancel">Cerrar</button><button class="btn" id="mapApply">Aplicar</button></div>
+  </div>
+</div>
+
+<div class="modal" id="expModal">
+  <div class="sheet">
+    <h3>Exportar el registro</h3>
+    <p class="d">Elige qué formato necesitas.</p>
+    <button class="expopt" data-exp="csv"><b>CSV</b><span>Tabla para Excel. Sin fotos.</span></button>
+    <button class="expopt" data-exp="zip"><b>CSV + fotos</b><span>Un ZIP con la tabla y las fotos en una carpeta.</span></button>
+    <button class="expopt" data-exp="json"><b>JSON</b><span>Todos los datos, con las fotos incrustadas.</span></button>
+    <div class="closeacts"><button class="btn ghost" id="expCancel">Cerrar</button></div>
   </div>
 </div>
 
@@ -1011,7 +1026,20 @@ $('#btnMap').onclick=openMap;
 $('#mapCancel').onclick=function(){ $('#mapModal').classList.remove('show'); };
 $('#mapApply').onclick=applyMap;
 $('#mapModal').onclick=function(e){ if(e.target===$('#mapModal')) $('#mapModal').classList.remove('show'); };
-$('#expCsv').onclick=exportCsv; $('#expJson').onclick=exportJson;
+/* La comprobación de registro vacío vive aquí y no en cada exportador: es la única
+   puerta de entrada a los tres. */
+function cerrarExp(){ $('#expModal').classList.remove('show'); }
+$('#btnExport').onclick=function(){
+  if(!LOG.length){ toast('No hay nada que exportar'); return; }
+  $('#expModal').classList.add('show');
+};
+$('#expCancel').onclick=cerrarExp;
+$('#expModal').onclick=function(e){ if(e.target===$('#expModal')) cerrarExp(); };
+document.querySelectorAll('.expopt').forEach(function(b){
+  b.onclick=function(){ cerrarExp();
+    ({csv:exportCsv, zip:exportZip, json:exportJson})[b.dataset.exp]();
+  };
+});
 $('#clearLog').onclick=function(){ if(!LOG.length){toast('El registro ya está vacío');return;} if(confirm('¿Vaciar todo el registro de auditoría? No se puede deshacer.')){ LOG=[]; saveLog(); updateBadge(); renderLog(); clearPhotos(); toast('Registro vaciado'); } };
 
 $('#photoInput').onchange=function(e){ var f=e.target.files&&e.target.files[0]; e.target.value=''; if(!f) return; showBusy('Procesando foto…'); compressImage(f).then(function(d){ pendingPhoto=d; hideBusy(); renderPhotoPrev(); }).catch(function(){ hideBusy(); toast('No se pudo procesar la foto'); }); };
