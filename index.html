@@ -849,6 +849,72 @@ function allPhotos(){ return idbOpen().then(function(db){ return new Promise(fun
 function saveLog(){ try{ localStorage.setItem(LOGKEY, JSON.stringify(LOG)); }catch(e){} }
 function loadLog(){ try{ var s=localStorage.getItem(LOGKEY); if(s) LOG=JSON.parse(s)||[]; }catch(e){ LOG=[]; } updateBadge(); }
 
+/* --- zip: inicio --- */
+/* Generador de ZIP minimo, metodo 0 (almacenado, sin comprimir). Las fotos ya son
+   JPEG y el CSV pesa kilobytes, asi que deflate no aportaria nada y obligaria a
+   meter la unica pieza realmente delicada del formato. Sin ZIP64: el formato
+   clasico admite 65.535 entradas y 4 GB, y un registro de almacen no se acerca.
+   Los nombres se sanean a ASCII (saneaNombre), asi que no hace falta la bandera
+   de UTF-8 del bit 11.
+   Ojo: scripts/tests/test_zip.mjs localiza este bloque por estos marcadores. */
+var CRC_TABLA=null;
+function crc32(u8){
+  if(!CRC_TABLA){                       // se construye en la primera exportacion, no al arrancar
+    CRC_TABLA=new Uint32Array(256);
+    for(var n=0;n<256;n++){ var c=n;
+      for(var k=0;k<8;k++){ c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); }
+      CRC_TABLA[n]=c>>>0;
+    }
+  }
+  var crc=0xFFFFFFFF;
+  for(var i=0;i<u8.length;i++) crc=(crc>>>8)^CRC_TABLA[(crc^u8[i])&0xFF];
+  return (crc^0xFFFFFFFF)>>>0;
+}
+/* Hora y fecha en formato MS-DOS, que es lo que guarda el ZIP. No representa nada
+   anterior a 1980: una fecha imposible se guarda como 1980-01-01 antes que corromper
+   la entrada. */
+function dosFecha(d){
+  var y=d.getFullYear();
+  if(y<1980) return {t:0, f:33};        // 33 = (0<<9)|(1<<5)|1
+  return { t:((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))>>>0,
+           f:(((y-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())>>>0 };
+}
+function pad4(n){ return ('000'+n).slice(-4); }
+function saneaNombre(s){ return String(s==null?'':s).replace(/[^A-Za-z0-9._-]/g,'_'); }
+function dataUrlABytes(u){
+  var s=String(u), bin=atob(s.slice(s.indexOf(',')+1)), u8=new Uint8Array(bin.length);
+  for(var i=0;i<bin.length;i++) u8[i]=bin.charCodeAt(i);
+  return u8;
+}
+function zipStore(entradas){
+  var enc=new TextEncoder(), partes=[], central=[], off=0;
+  entradas.forEach(function(e){
+    var nom=enc.encode(e.nombre), datos=e.datos, crc=crc32(datos), dt=dosFecha(e.fecha);
+    var lh=new Uint8Array(30+nom.length), v=new DataView(lh.buffer);
+    v.setUint32(0,0x04034b50,true); v.setUint16(4,20,true); v.setUint16(6,0,true);
+    v.setUint16(8,0,true); v.setUint16(10,dt.t,true); v.setUint16(12,dt.f,true);
+    v.setUint32(14,crc,true); v.setUint32(18,datos.length,true); v.setUint32(22,datos.length,true);
+    v.setUint16(26,nom.length,true); v.setUint16(28,0,true);
+    lh.set(nom,30);
+    partes.push(lh,datos);
+    var ch=new Uint8Array(46+nom.length), w=new DataView(ch.buffer);
+    w.setUint32(0,0x02014b50,true); w.setUint16(4,20,true); w.setUint16(6,20,true);
+    w.setUint16(8,0,true); w.setUint16(10,0,true); w.setUint16(12,dt.t,true); w.setUint16(14,dt.f,true);
+    w.setUint32(16,crc,true); w.setUint32(20,datos.length,true); w.setUint32(24,datos.length,true);
+    w.setUint16(28,nom.length,true); w.setUint32(42,off,true);
+    ch.set(nom,46);
+    central.push(ch);
+    off+=lh.length+datos.length;
+  });
+  var tam=0; central.forEach(function(c){ tam+=c.length; });
+  var eocd=new Uint8Array(22), z=new DataView(eocd.buffer);
+  z.setUint32(0,0x06054b50,true);
+  z.setUint16(8,entradas.length,true); z.setUint16(10,entradas.length,true);
+  z.setUint32(12,tam,true); z.setUint32(16,off,true);
+  return new Blob(partes.concat(central,[eocd]), {type:'application/zip'});
+}
+/* --- zip: fin --- */
+
 function download(name,text,mime){ var blob=new Blob([text],{type:mime}), url=URL.createObjectURL(blob); var a=el('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },100); }
 function exportCsv(){
   if(!LOG.length){ toast('No hay nada que exportar'); return; }
