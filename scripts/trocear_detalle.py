@@ -18,10 +18,10 @@ Uso:
     python scripts/trocear_detalle.py --src fuentes --out .
 """
 
-import argparse, glob, json, os, re, shutil, sys
+import argparse, json, os, re, shutil, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fuentes_comun import avisar_desincronizacion
+from fuentes_comun import avisar_desincronizacion, elegir_fuente
 
 # Campos de USOS[i] que se publican, en el orden en que se escriben.
 USO_CAMPOS = [
@@ -39,11 +39,6 @@ VACIOS = (None, "", 0, 0.0)
 def norm_nreg(s):
     """Misma normalizacion que normNreg() en la PWA (ES-00461 -> ES00461)."""
     return re.sub(r'[^A-Za-z0-9]', '', str(s or '')).upper()
-
-
-def find_by_prefix(folder, prefix, ext):
-    hits = sorted(glob.glob(os.path.join(folder, prefix + "*" + ext)))
-    return hits[-1] if hits else None
 
 
 def build_doc(prod):
@@ -84,7 +79,7 @@ def main():
                     help="no borrar los ficheros de detalle previos")
     args = ap.parse_args()
 
-    src = find_by_prefix(args.src, "ProductosAutorizados", ".json")
+    src = elegir_fuente(args.src, "ProductosAutorizados", [".json"])
     if not src:
         sys.exit("No encuentro ProductosAutorizados*.json en " + args.src)
 
@@ -134,8 +129,12 @@ def main():
 
     # El detalle sale del JSON grande, pero el registro sale de los XLSX: si no son
     # de la misma descarga aparecen productos sin detalle o detalle inalcanzable.
-    otras = sorted(glob.glob(os.path.join(args.src, "Productos*.xlsx")))
-    avisar_desincronizacion([src] + otras, "fuentes del MAPA")
+    # Se comparan las fuentes que de verdad se usan, no todo lo que haya en la
+    # carpeta: con dos descargas conviviendo, mirar las descartadas hacia saltar el
+    # aviso siempre, que es justo lo que lo vuelve inutil.
+    otras = [elegir_fuente(args.src, p, [".xlsx"])
+             for p in ("ProductosAutorizados", "ProductosCancelados", "ProductosRetirados")]
+    avisar_desincronizacion([src] + [o for o in otras if o], "fuentes del MAPA")
 
 
 if __name__ == "__main__":

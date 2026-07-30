@@ -4,7 +4,7 @@
    El detalle de usos (/detalle/*.json, Capa 3) NO se precachea: son 14,6 MB en 2063
    ficheros. Se guarda bajo demanda en DETALLE, un caché aparte que sobrevive a los
    cambios de versión para no perder lo ya consultado en cada despliegue. */
-var CACHE = 'fitos-v3';
+var CACHE = 'fitos-v4';
 var DETALLE = 'fitos-detalle';
 var DETALLE_MAX = 300;          // ~2 MB en el peor caso; evicción del más antiguo
 var CORE = [

@@ -23,10 +23,10 @@ Requisitos:  pip install pdfplumber openpyxl
 Uso tipico:  python extract_alias.py --src ./fuentes --out .
 Diagnostico: python extract_alias.py --src ./fuentes --report ip   # mapear columnas IP
 """
-import argparse, csv, glob, json, os, re, sys, unicodedata
+import argparse, csv, json, os, re, sys, unicodedata
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fuentes_comun import avisar_desincronizacion
+from fuentes_comun import avisar_desincronizacion, elegir_fuente
 
 try:
     import pdfplumber
@@ -49,14 +49,6 @@ def norm_alias(s):
     s = unicodedata.normalize('NFD', str(s or ''))
     s = ''.join(c for c in s if unicodedata.category(c) != 'Mn')
     return re.sub(r'\s+', ' ', s).strip().upper()
-
-def find_by_prefix(folder, prefix, exts):
-    """Localiza una fuente por PREFIJO (los nombres del MAPA llevan fecha)."""
-    for ext in exts:
-        hits = sorted(glob.glob(os.path.join(folder, prefix + "*" + ext)))
-        if hits:
-            return hits[0]
-    return None
 
 def cluster(vals, tol):
     vals = sorted(vals); out = []
@@ -240,8 +232,8 @@ def main():
     ap.add_argument("--report", choices=["dc", "ip"], help="solo diagnostico de columnas, no genera nada")
     args = ap.parse_args()
 
-    dc_pdf = find_by_prefix(args.src, "dc_web", [".pdf"])
-    ip_pdf = find_by_prefix(args.src, "ip_web", [".pdf"])
+    dc_pdf = elegir_fuente(args.src, "dc_web", [".pdf"])
+    ip_pdf = elegir_fuente(args.src, "ip_web", [".pdf"])
 
     if args.report:
         path = dc_pdf if args.report == "dc" else ip_pdf
@@ -309,9 +301,13 @@ def main():
     print(f"  -> {ap_path}")
     print(f"  -> {dp_path}")
 
-    # Los PDF de alias no llevan fecha en el nombre; se comprueba que las hojas del
-    # MAPA presentes en la misma carpeta sean de una unica descarga.
-    avisar_desincronizacion(sorted(glob.glob(os.path.join(args.src, "Productos*"))),
+    # Los PDF de alias no llevan fecha en el nombre, asi que su unica senal de
+    # frescura es el mtime: por eso entran en la comparacion en lugar de quedarse
+    # fuera, como estaban. El XLSX de autorizados va como referencia de cuando fue
+    # la ultima descarga; se toma el que elegiria cualquier otro paso, no todo lo
+    # que haya en la carpeta.
+    ref = elegir_fuente(args.src, "ProductosAutorizados", [".xlsx"])
+    avisar_desincronizacion([p for p in (dc_pdf, ip_pdf, ref) if p],
                             "fuentes del MAPA")
 
 if __name__ == "__main__":
