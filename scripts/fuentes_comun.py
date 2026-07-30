@@ -12,7 +12,7 @@ XLSX viejos, que marcaba como caducados productos ya prorrogados. Estas funcione
 detectan ese desfase y lo avisan.
 """
 
-import os, re
+import glob, os, re
 
 # AAAA_MM_DD primero: si empieza por 4 digitos no puede ser DD_MM_AAAA.
 _ISO = re.compile(r'(?<!\d)(\d{4})[-_](\d{1,2})[-_](\d{1,2})(?!\d)')
@@ -69,3 +69,45 @@ def avisar_desincronizacion(paths, etiqueta="fuentes"):
     print("  " + "!" * 68)
     print("")
     return True
+
+
+def _orden_fuente(path):
+    """Clave de ordenacion: primero las fechadas, de mas nueva a mas vieja; las que
+    no llevan fecha en el nombre, despues, por fecha de descarga.
+
+    Las fechas se niegan para poder ordenar ascendente y que salga primero la mas
+    reciente. El primer elemento de la tupla separa los dos grupos, asi que nunca
+    se comparan entre si una tupla de fecha y un mtime."""
+    f = fecha_de_fuente(path)
+    if f:
+        return (0, tuple(-n for n in f))
+    return (1, -os.path.getmtime(path))
+
+
+def elegir_fuente(folder, prefix, exts):
+    """Devuelve la ruta de la fuente MAS RECIENTE que casa con el prefijo, o None.
+
+    Sustituye a los tres find_by_prefix que habia repartidos por los scripts, que
+    ordenaban alfabeticamente. Con los XLSX del MAPA en formato DD_MM_AAAA eso no es
+    orden cronologico: '05_08_2026' va antes que '20_07_2026' como texto, de modo
+    que una carpeta con dos descargas generaba el sitio con la vieja y sin avisar.
+    Ademas cada script cogia un extremo distinto de la lista (unos [-1] y otro [0]),
+    con lo que podian llegar a leer descargas diferentes entre si.
+
+    exts es una lista en orden de preferencia: gana la primera extension que tenga
+    candidatas, no la candidata mas reciente de todas (extract_alias.py depende de
+    ello para preferir el PDF).
+    """
+    for ext in exts:
+        cands = sorted(glob.glob(os.path.join(folder, prefix + "*" + ext)), key=_orden_fuente)
+        if not cands:
+            continue
+        elegida = cands[0]
+        if len(cands) > 1:
+            print("  fuente: %s  (%s)" % (os.path.basename(elegida),
+                                          fmt_fecha(fecha_de_fuente(elegida))))
+            for otra in cands[1:]:
+                print("     descartada: %s  (%s)" % (os.path.basename(otra),
+                                                     fmt_fecha(fecha_de_fuente(otra))))
+        return elegida
+    return None
