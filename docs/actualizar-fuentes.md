@@ -140,7 +140,7 @@ desincronización (ver sección 2):
 Antes de subir nada, sube el número de versión de `CACHE` en `sw.js` (por
 ejemplo, de `fitos-v4` a `fitos-v5`). Esto es lo que consigue, y lo que no:
 
-- `index.html`, `sw.js`, `registro.json` y `alias.json` viven todos en el
+- `index.html`, `registro.json` y `alias.json` viven todos en el
   mismo caché `CORE` y reciben el mismo trato *stale-while-revalidate* del
   `fetch` de `sw.js`: sirve lo cacheado al instante y refresca en segundo
   plano para la próxima visita. Eso pasa siempre, subas o no `CACHE` — la
