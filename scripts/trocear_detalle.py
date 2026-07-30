@@ -18,7 +18,7 @@ Uso:
     python scripts/trocear_detalle.py --src fuentes --out .
 """
 
-import argparse, glob, json, os, re, shutil, sys
+import argparse, json, os, re, shutil, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fuentes_comun import avisar_desincronizacion, elegir_fuente
@@ -129,8 +129,12 @@ def main():
 
     # El detalle sale del JSON grande, pero el registro sale de los XLSX: si no son
     # de la misma descarga aparecen productos sin detalle o detalle inalcanzable.
-    otras = sorted(glob.glob(os.path.join(args.src, "Productos*.xlsx")))
-    avisar_desincronizacion([src] + otras, "fuentes del MAPA")
+    # Se comparan las fuentes que de verdad se usan, no todo lo que haya en la
+    # carpeta: con dos descargas conviviendo, mirar las descartadas hacia saltar el
+    # aviso siempre, que es justo lo que lo vuelve inutil.
+    otras = [elegir_fuente(args.src, p, [".xlsx"])
+             for p in ("ProductosAutorizados", "ProductosCancelados", "ProductosRetirados")]
+    avisar_desincronizacion([src] + [o for o in otras if o], "fuentes del MAPA")
 
 
 if __name__ == "__main__":
