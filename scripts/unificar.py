@@ -20,10 +20,10 @@ Uso:
     python scripts/unificar.py --src fuentes --out .
 """
 
-import argparse, datetime, glob, json, os, re, sys
+import argparse, datetime, json, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fuentes_comun import avisar_desincronizacion
+from fuentes_comun import avisar_desincronizacion, elegir_fuente
 
 try:
     import openpyxl
@@ -65,11 +65,6 @@ def txt(v):
         return ""
     s = str(v).strip()
     return "" if s == "0" else s
-
-
-def find_by_prefix(folder, prefix):
-    hits = sorted(glob.glob(os.path.join(folder, prefix + "*.xlsx")))
-    return hits[-1] if hits else None
 
 
 def leer_xlsx(path, col_nreg_norm="numregistro"):
@@ -176,7 +171,7 @@ def main():
     usados = []            # rutas de las fuentes, para el aviso de desfase
 
     for prefijo, origen, mapper in LISTADOS:
-        path = find_by_prefix(args.src, prefijo)
+        path = elegir_fuente(args.src, prefijo, [".xlsx"])
         if not path:
             sys.exit("No encuentro %s*.xlsx en %s" % (prefijo, args.src))
         usados.append(path)

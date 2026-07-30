@@ -21,7 +21,7 @@ Uso:
 import argparse, glob, json, os, re, shutil, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fuentes_comun import avisar_desincronizacion
+from fuentes_comun import avisar_desincronizacion, elegir_fuente
 
 # Campos de USOS[i] que se publican, en el orden en que se escriben.
 USO_CAMPOS = [
@@ -39,11 +39,6 @@ VACIOS = (None, "", 0, 0.0)
 def norm_nreg(s):
     """Misma normalizacion que normNreg() en la PWA (ES-00461 -> ES00461)."""
     return re.sub(r'[^A-Za-z0-9]', '', str(s or '')).upper()
-
-
-def find_by_prefix(folder, prefix, ext):
-    hits = sorted(glob.glob(os.path.join(folder, prefix + "*" + ext)))
-    return hits[-1] if hits else None
 
 
 def build_doc(prod):
@@ -84,7 +79,7 @@ def main():
                     help="no borrar los ficheros de detalle previos")
     args = ap.parse_args()
 
-    src = find_by_prefix(args.src, "ProductosAutorizados", ".json")
+    src = elegir_fuente(args.src, "ProductosAutorizados", [".json"])
     if not src:
         sys.exit("No encuentro ProductosAutorizados*.json en " + args.src)
 
