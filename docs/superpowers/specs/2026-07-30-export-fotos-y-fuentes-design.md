@@ -195,7 +195,41 @@ Comportamiento:
 El docstring de `fuentes_comun.py`, que hoy explica el desfase entre fuentes pero no
 este fallo, se amplía.
 
-### B.3 Los PDF entran en el control de frescura
+### B.3 El aviso de desfase compara tandas, no fechas
+
+El MAPA publica **los viernes**. Cada fuente lleva en el nombre una fecha, pero no
+todas significan lo mismo:
+
+| Fuente | Ejemplo | Día de la semana | Qué fecha es |
+|---|---|---|---|
+| Los tres XLSX | `-20_07_2026` | lunes | la de **descarga** |
+| El JSON grande | `_2026_07_17` | viernes | la de **publicación** |
+
+O sea que el desfase de tres días entre las fuentes actuales no es un descuido: es
+estructural. Salvo que se descargue en viernes, las fechas nunca coincidirán, y
+`avisar_desincronizacion()` saltaría en casi todas las generaciones. Un aviso que
+salta siempre se aprende a ignorar, y entonces deja de proteger del caso en que el
+desfase sí es real.
+
+La comparación pasa a hacerse por **tanda semanal**: la tanda de una fuente es el
+viernes anterior o igual a la fecha de su nombre. Hay desfase cuando las fuentes
+pertenecen a tandas distintas, no cuando sus fechas difieren.
+
+- JSON del viernes 17 y XLSX del lunes 20 → los dos son de la tanda del 17. No
+  avisa, y es correcto: contienen los mismos datos.
+- XLSX descargados el jueves 23 (tanda del 17) y JSON de la tanda del 24 → tandas
+  distintas. Avisa, y es correcto: hay un lote de diferencia.
+
+Una tolerancia de N días no serviría: con tolerancia de tres días el primer caso
+saldría bien pero el segundo, que difiere en un solo día y sí es un desfase real,
+pasaría desapercibido.
+
+El día de publicación se escribe como constante con nombre en `fuentes_comun.py`
+(`DIA_PUBLICACION`, lunes = 0), documentada, para que si el MAPA se pasa a otro día
+el ajuste sea una línea. Cuando el aviso salta, muestra la tanda de cada fuente
+además de su fecha, porque si no la advertencia resulta incomprensible.
+
+### B.4 Los PDF entran en el control de frescura
 
 `dc_web.pdf` e `ip_web.pdf` se descargan de una URL fija y sin fecha en el nombre,
 así que hoy quedan fuera de toda vigilancia: `fecha_de_fuente()` no los reconoce y
@@ -224,7 +258,12 @@ quien lo lee recuerda cómo funciona el pipeline.
 
 2. **Cómo nombrarlas.** La tabla de los seis ficheros con el nombre que espera cada
    script, señalando que los XLSX y el JSON ya vienen con fecha del MAPA y los dos
-   PDF hay que renombrarlos a mano según B.3.
+   PDF llegan siempre con el mismo nombre y hay que renombrarlos a mano según B.4.
+
+   **Cuándo descargar.** El MAPA publica los viernes, así que lo natural es
+   descargar en viernes o sábado: se coge la tanda recién publicada y las fechas de
+   todas las fuentes caen en la misma. Descargar un jueves significa llevarse datos
+   de casi una semana antes y tener que repetir el proceso al día siguiente.
 
 3. **Qué hacer con las viejas.** Moverlas a `fuentes/historico/` antes de descargar
    las nuevas, para que en `fuentes/` haya siempre un único juego. Con el arreglo de
@@ -260,6 +299,12 @@ confirma que elige la copia de agosto, que anuncia la de julio como descartada, 
 que el `registro.json` resultante es idéntico al actual salvo por ese cambio de
 fuente. Después se repite con `dc_web.pdf` sin fecha junto a `dc_web_2026_07_30.pdf`
 y se confirma que `extract_alias.py` elige el fechado y avisa del otro.
+
+El criterio de tandas se comprueba con las fuentes reales tal como están: JSON del
+viernes 17 y XLSX del lunes 20 deben generar **sin** aviso de desfase, donde hoy sí
+lo dan. Y renombrando un XLSX al jueves 23 —tanda anterior a la del JSON si este
+pasa a ser de la del 24— el aviso debe volver a aparecer, indicando la tanda de cada
+fuente y no solo su fecha.
 
 **Parte A.** Con el `registro.json` publicado cargado en el navegador, se registran
 al menos tres comprobaciones —una sin foto, una de un producto vigente y una de un
