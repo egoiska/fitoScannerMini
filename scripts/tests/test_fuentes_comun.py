@@ -6,7 +6,7 @@ Sin framework a proposito: el repo no tiene pytest y no se le anade una dependen
 por tres funciones. Un fallo aborta con AssertionError y traza.
 """
 
-import os, shutil, sys, tempfile, time
+import contextlib, io, os, shutil, sys, tempfile, time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from fuentes_comun import elegir_fuente, avisar_desincronizacion
@@ -53,6 +53,20 @@ def test_sin_fecha_en_el_nombre_desempata_la_descarga():
     tmp = tempfile.mkdtemp()
     try:
         _tocar(tmp, "dc_web_viejo.pdf", antiguedad_h=72)
+        esperada = _tocar(tmp, "dc_web.pdf")
+        assert elegir_fuente(tmp, "dc_web", [".pdf"]) == esperada
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_fecha_efectiva_favorece_el_recien_descargado_sobre_el_pdf_fechado():
+    """Antes las candidatas con fecha en el nombre iban siempre por delante de las
+    que no la llevan: un dc_web_2026_07_01.pdf de archivo ganaba a un dc_web.pdf
+    recien descargado hoy, justo lo contrario de lo que quiere el usuario. Con la
+    fecha efectiva unica gana quien sea mas reciente de verdad."""
+    tmp = tempfile.mkdtemp()
+    try:
+        _tocar(tmp, "dc_web_2026_07_01.pdf")
         esperada = _tocar(tmp, "dc_web.pdf")
         assert elegir_fuente(tmp, "dc_web", [".pdf"]) == esperada
     finally:
@@ -124,6 +138,35 @@ def test_red_secundaria_por_nombre_si_el_mtime_engana():
         paths = [_tocar(tmp, "ProductosAutorizados-30_07_2026.xlsx"),
                  _tocar(tmp, "ProductosCancelados-01_06_2026.xlsx")]
         assert avisar_desincronizacion(paths) is True
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_marca_el_de_nombre_mas_antiguo_cuando_el_aviso_salta_por_el_nombre():
+    """Con los mtime empatados (como deja una copia), el orden entre ellos no dice
+    nada: la marca "<-- la mas antigua" debe senalar el fichero con la fecha de
+    NOMBRE mas antigua, no el que gane el desempate por mtime/nombre alfabetico."""
+    tmp = tempfile.mkdtemp()
+    try:
+        t = time.time()
+        p_nueva = os.path.join(tmp, "ProductosAutorizados-30_07_2026.xlsx")
+        p_vieja = os.path.join(tmp, "ProductosCancelados-01_06_2026.xlsx")
+        for p in (p_nueva, p_vieja):
+            with open(p, "w") as fh:
+                fh.write("x")
+        os.utime(p_nueva, (t, t))
+        os.utime(p_vieja, (t, t))  # mismo mtime exacto: no hay senal en el mtime
+
+        salida = io.StringIO()
+        with contextlib.redirect_stdout(salida):
+            resultado = avisar_desincronizacion([p_nueva, p_vieja])
+        assert resultado is True
+
+        texto = salida.getvalue()
+        linea_vieja = [l for l in texto.splitlines() if "ProductosCancelados-01_06_2026.xlsx" in l][0]
+        linea_nueva = [l for l in texto.splitlines() if "ProductosAutorizados-30_07_2026.xlsx" in l][0]
+        assert "<-- la mas antigua" in linea_vieja
+        assert "<-- la mas antigua" not in linea_nueva
     finally:
         shutil.rmtree(tmp)
 

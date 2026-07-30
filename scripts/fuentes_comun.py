@@ -78,7 +78,15 @@ def avisar_desincronizacion(paths, etiqueta="fuentes"):
     if horas <= VENTANA_DESCARGA_H and dias_nombre <= MARGEN_NOMBRE_D:
         return False
 
-    vieja = porfecha[0][1]
+    # Por que via salto el aviso decide cual fichero se marca como "el mas antiguo":
+    # si fue por mtime, ese mtime es el diagnostico. Si fue por la via del nombre
+    # (red secundaria), los mtime estan todos dentro de la ventana -a menudo
+    # empatados- y no dicen nada; ahi la unica marca que orienta es la fecha de
+    # NOMBRE mas antigua.
+    if horas > VENTANA_DESCARGA_H:
+        vieja = porfecha[0][1]
+    else:
+        vieja = min(nombradas, key=lambda item: item[0])[1]
     print("")
     print("  " + "!" * 68)
     if horas > VENTANA_DESCARGA_H:
@@ -107,17 +115,30 @@ def avisar_desincronizacion(paths, etiqueta="fuentes"):
     return True
 
 
-def _orden_fuente(path):
-    """Clave de ordenacion: primero las fechadas, de mas nueva a mas vieja; las que
-    no llevan fecha en el nombre, despues, por fecha de descarga.
-
-    Las fechas se niegan para poder ordenar ascendente y que salga primero la mas
-    reciente. El primer elemento de la tupla separa los dos grupos, asi que nunca
-    se comparan entre si una tupla de fecha y un mtime."""
+def _fecha_efectiva(path):
+    """Fecha efectiva de una candidata: la del nombre si la trae, y si no la de
+    modificacion, con granularidad de dia para no mezclar precisiones (el nombre
+    solo tiene dia; el mtime tiene tambien hora)."""
     f = fecha_de_fuente(path)
     if f:
-        return (0, tuple(-n for n in f))
-    return (1, -os.path.getmtime(path))
+        return datetime.date(*f)
+    return datetime.date.fromtimestamp(os.path.getmtime(path))
+
+
+def _orden_fuente(path):
+    """Clave de ordenacion: fecha EFECTIVA (ver _fecha_efectiva) de mas nueva a mas
+    vieja, con el mtime como desempate secundario.
+
+    Antes las candidatas con fecha en el nombre iban siempre por delante de las que
+    no la llevan, tuviera la fecha del nombre la antiguedad que tuviera: un PDF de
+    archivo con fecha vieja en el nombre ganaba a un PDF recien descargado hoy sin
+    fecha en el nombre, justo lo contrario de lo que se quiere. Con una fecha
+    efectiva unica ya no hay dos grupos: gana quien sea mas reciente de verdad,
+    venga la fecha del nombre o del mtime.
+
+    Las fechas se niegan para poder ordenar ascendente y que salga primero la mas
+    reciente."""
+    return (-_fecha_efectiva(path).toordinal(), -os.path.getmtime(path))
 
 
 def elegir_fuente(folder, prefix, exts):

@@ -35,6 +35,10 @@ comprueba('pad4 rellena a cuatro digitos', () => {
   igual(api.pad4(1234), '1234');
 });
 
+comprueba('pad4 crece en vez de truncar por encima de cuatro digitos', () => {
+  igual(api.pad4(10001), '10001');
+});
+
 comprueba('saneaNombre respeta lo valido y sustituye lo demas', () => {
   igual(api.saneaNombre('ES-00891'), 'ES-00891');
   igual(api.saneaNombre('25.123'), '25.123');
@@ -84,6 +88,16 @@ comprueba('csvTexto sin rutas escribe si/no', () => {
 comprueba('csvTexto con rutas escribe la ruta', () => {
   const txt = csvApi(LOG_FALSO)({ e2: 'fotos/0002_25.123.jpg' });
   if (txt.indexOf('fotos/0002_25.123.jpg') === -1) throw new Error('no aparece la ruta');
+});
+
+comprueba('csvTexto con rutas vacio distingue "sin foto" de "foto no disponible"', () => {
+  // Mapa de rutas presente pero vacio: todas las fotos anunciadas estan ausentes de
+  // IndexedDB (registro restaurado en otro movil, o almacen purgado). La entrada con
+  // foto:true no debe confundirse con la que nunca tuvo foto.
+  const txt = csvApi(LOG_FALSO)({});
+  const filas = txt.split('\r\n');
+  if (!filas[1].endsWith(';')) throw new Error('la entrada sin foto deberia acabar en ; (vacio) -> ' + filas[1]);
+  if (!filas[2].endsWith(';foto no disponible')) throw new Error('la entrada con foto ausente deberia acabar en ;foto no disponible -> ' + filas[2]);
 });
 
 comprueba('csvTexto entrecomilla lo que lleva separador', () => {

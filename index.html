@@ -894,7 +894,7 @@ function dosFecha(d){
   return { t:((d.getHours()<<11)|(d.getMinutes()<<5)|(d.getSeconds()>>1))>>>0,
            f:(((y-1980)<<9)|((d.getMonth()+1)<<5)|d.getDate())>>>0 };
 }
-function pad4(n){ return ('000'+n).slice(-4); }
+function pad4(n){ var s=''+n; while(s.length<4) s='0'+s; return s; }
 function saneaNombre(s){ return String(s==null?'':s).replace(/[^A-Za-z0-9._-]/g,'_'); }
 function dataUrlABytes(u){
   var s=String(u), bin=atob(s.slice(s.indexOf(',')+1)), u8=new Uint8Array(bin.length);
@@ -939,7 +939,7 @@ function csvTexto(rutas){
   var rows=[['Fecha','Hora','N registro','Producto','Titular','Veredicto','Fecha limite','Nota','Foto']];
   LOG.slice().reverse().forEach(function(e){
     var d=new Date(e.ts);
-    var foto=rutas ? (rutas[e.id]||'') : (e.foto?'sí':'no');
+    var foto=rutas ? (rutas[e.id] || (e.foto?'foto no disponible':'')) : (e.foto?'sí':'no');
     rows.push([fmtDate(d), pad(d.getHours())+':'+pad(d.getMinutes()), e.nreg, e.nombre,
                e.titular, e.estado, e.decisive||'', e.note||'', foto]);
   });
@@ -954,10 +954,12 @@ function csvTexto(rutas){
 function exportCsv(){ download('auditoria_fitos_'+stamp()+'.csv', csvTexto(null), 'text/csv;charset=utf-8'); }
 
 /* El ZIP lleva el CSV más una carpeta fotos/. El número del nombre de cada foto es
-   su número de fila en el CSV, así que además de por la columna Foto se pueden
-   correlacionar por posición. Una entrada marcada con foto cuya imagen no aparezca
-   -registro restaurado en otro móvil, o IndexedDB purgado por el sistema- se trata
-   como sin foto en vez de romper la exportación. */
+   su número de fila de DATOS en el CSV (sin contar la cabecera): la fila 1 de datos
+   es fotos/0001_..., pero en Excel esa misma fila aparece una posición más abajo
+   por la fila de cabecera. Además de por la columna Foto se pueden correlacionar
+   por posición. Una entrada marcada con foto cuya imagen no aparezca -registro
+   restaurado en otro móvil, o IndexedDB purgado por el sistema- se trata como sin
+   foto en vez de romper la exportación. */
 function exportZip(){
   showBusy('Preparando el ZIP…');
   allPhotos().then(function(all){

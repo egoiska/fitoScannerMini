@@ -63,17 +63,21 @@ Si quieres conservar la descarga anterior, muévela a `fuentes/historico/`
 antes de traer los ficheros nuevos. No es obligatorio: los tres scripts
 eligen automáticamente, para cada tipo de fichero, la fuente más reciente
 y avisan por consola cuál han descartado. El criterio de "más reciente"
-depende de si el nombre trae fecha:
+es la fecha efectiva de cada candidata:
 
-- Para los tres XLSX y el JSON (todos llevan fecha en el nombre), gana
-  la fecha del **nombre**, no la de modificación del fichero.
-- Sólo para `dc_web.pdf` e `ip_web.pdf` (que no llevan fecha ninguna) se
-  usa la fecha de **modificación** como criterio, al no haber otra cosa
-  que mirar.
+- Cada candidata se ordena por su **fecha efectiva**: la fecha que lleva
+  en el nombre si la trae (los tres XLSX y el JSON siempre la traen); si
+  no la trae (`dc_web.pdf`, `ip_web.pdf`), su fecha efectiva es la de
+  **modificación** del fichero, al no haber otra cosa que mirar. Gana la
+  fecha efectiva más reciente; si dos candidatas empatan, desempata el
+  `mtime`.
 
 Consecuencia práctica: copiar un XLSX viejo a `fuentes/` no lo convierte
-en el elegido por tener ahora un `mtime` fresco; seguirá perdiendo frente
-a uno con fecha de nombre más reciente, tenga éste el `mtime` que tenga.
+en el elegido por tener ahora un `mtime` fresco, porque su fecha efectiva
+sigue siendo la del nombre; seguirá perdiendo frente a uno con fecha de
+nombre más reciente. Y al revés: un `dc_web.pdf` de archivo con fecha en
+el nombre no le gana a un `dc_web.pdf` recién descargado hoy sin fecha en
+el nombre, porque la fecha efectiva de este último es la de hoy.
 
 ## 4. Los tres comandos
 
@@ -97,21 +101,33 @@ se ha ido de madre:
 - **`unificar.py`**: 8904 filas leídas, 8903 registros publicados
   (1980 Autorizado, 5837 Cancelado, 1086 Retirado), 1 duplicado descartado.
 - **`extract_alias.py`**: 2871 alias extraídos.
-- **`trocear_detalle.py`**: 2062 ficheros de detalle escritos.
+- **`trocear_detalle.py`**: 2063 ficheros de detalle escritos (la cifra del
+  artefacto publicado en este repo ahora mismo; baila de una generación a
+  otra según lo que el MAPA dé de alta o de baja).
 
 No hace falta que coincidan exactamente en cada ejecución (el MAPA da de
 alta y de baja productos constantemente), pero un cambio brusco —la mitad
 de alias, el doble de duplicados descartados— es señal de que algo no
 cuadra: revisa antes de publicar.
 
-Dos advertencias:
+Dos advertencias, una por cada vía por la que puede saltar el aviso de
+desincronización (ver sección 2):
 
-- **Si aparece el aviso de desincronización** («AVISO: las fuentes... NO
-  salen de la misma descarga», u otro con fechas de nombre separadas),
-  **para y vuelve a descargar todo de una vez**. No sigas adelante con los
-  ficheros existentes: con fuentes descoordinadas pueden aparecer productos
-  sin detalle, alias huérfanos o caducidades desfasadas que den un veredicto
+- **Si salta el aviso principal** («AVISO: las fuentes... NO salen de la
+  misma descarga», por fecha de modificación), **para y vuelve a
+  descargar todo de una vez**. No sigas adelante con los ficheros
+  existentes: con fuentes descoordinadas pueden aparecer productos sin
+  detalle, alias huérfanos o caducidades desfasadas que den un veredicto
   erróneo.
+- **Si salta el aviso secundario** (por fechas de *nombre* separadas más
+  de `MARGEN_NOMBRE_D` días, con los `mtime` dentro de la ventana), parar
+  y volver a descargar no sirve de nada si ya descargaste todo en la
+  misma sesión: la fecha del nombre del JSON la pone el MAPA, no tú, y el
+  margen de 7 días está calibrado sobre solo dos observaciones. Comprueba
+  en su lugar que el JSON es el último que publica el MAPA (mira la fecha
+  de volcado en la web de origen); si lo es, el desfase es del origen y
+  puedes seguir adelante. Si no lo es —descargaste un JSON viejo por
+  error—, vuelve a bajarlo.
 - **Que una fuente llegue idéntica a la anterior es normal** y no es un
   fallo de descarga. Entre el 20 y el 30 de julio de 2026,
   `ProductosCancelados` se descargó byte a byte igual mientras
@@ -124,22 +140,35 @@ Dos advertencias:
 Antes de subir nada, sube el número de versión de `CACHE` en `sw.js` (por
 ejemplo, de `fitos-v4` a `fitos-v5`). Esto es lo que consigue, y lo que no:
 
-- Lo que sí hace: fuerza a que los móviles con la app ya instalada
-  descarguen de red el `index.html` y el `sw.js` nuevos, en vez de seguir
-  sirviendo la versión anterior desde el caché.
-- `registro.json` y `alias.json` **no dependen de este número**: van en el
-  caché `CORE` con estrategia *stale-while-revalidate*, así que se
-  refrescan solos en la siguiente visita aunque no toques `CACHE`.
+- `index.html`, `sw.js`, `registro.json` y `alias.json` viven todos en el
+  mismo caché `CORE` y reciben el mismo trato *stale-while-revalidate* del
+  `fetch` de `sw.js`: sirve lo cacheado al instante y refresca en segundo
+  plano para la próxima visita. Eso pasa siempre, subas o no `CACHE` — la
+  diferencia es cuándo se nota. Sin subir `CACHE`, el contenido de
+  `sw.js` no cambia, así que el navegador no detecta versión nueva del
+  service worker y el refresco depende solo de ese `fetch` en segundo
+  plano: la primera carga tras el despliegue sigue sirviendo lo viejo (y
+  de paso actualiza el caché), hace falta una segunda carga para ver lo
+  nuevo. Subir `CACHE` sí cambia el contenido de `sw.js`, así que el
+  navegador instala una versión nueva del service worker; su `install`
+  precachea todo `CORE` de red antes de activarse y su `activate` borra
+  el caché anterior. Lo que consigue subir `CACHE`, entonces, es
+  **adelantar** ese refresco a la primera carga en vez de dejarlo para la
+  siguiente.
 - `detalle/*.json` (dosis, plazo de seguridad, etc. de cada producto) vive
   en un caché aparte (`fitos-detalle`) que el `activate` del service
   worker excluye a propósito del borrado por versión, para no hacer perder
-  al usuario lo que ya tenía descargado. Subir `CACHE` **no** refresca el
-  detalle de un producto que ese móvil ya haya consultado antes: seguirá
-  viendo los datos viejos hasta que ese caché se vacíe por su tope de 300
-  entradas (el más antiguo se descarta al superarlo). Es una decisión de
-  diseño existente, no un fallo — pero quien publique debe saber que un
-  cambio en el detalle de un producto ya consultado no llega de inmediato
-  a todos los móviles.
+  al usuario lo que ya tenía descargado. Ese caché es *cache-first* sin
+  revalidación: una vez que un producto está guardado ahí, se sirve tal
+  cual, sin caducidad. El tope de 300 entradas solo se comprueba al
+  descargar el detalle de un producto **nuevo** para ese móvil (ahí se
+  descarta la entrada más antigua si se supera el tope); si el agricultor
+  siempre consulta el mismo puñado de productos, ese tope no se alcanza
+  nunca y el detalle de esos productos no se refresca solo, tras subir
+  `CACHE` ni de ninguna otra forma. Es una decisión de diseño existente,
+  no un fallo — pero quien publique debe saber que un cambio en el
+  detalle de un producto ya consultado no le llegará a ese móvil por sí
+  solo.
 
 Después:
 
