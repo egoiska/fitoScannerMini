@@ -9,7 +9,7 @@ por tres funciones. Un fallo aborta con AssertionError y traza.
 import os, shutil, sys, tempfile, time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from fuentes_comun import elegir_fuente
+from fuentes_comun import elegir_fuente, avisar_desincronizacion
 
 
 def _tocar(carpeta, nombre, antiguedad_h=0):
@@ -75,6 +75,63 @@ def test_sin_candidatas_devuelve_none():
     tmp = tempfile.mkdtemp()
     try:
         assert elegir_fuente(tmp, "NoExiste", [".xlsx"]) is None
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_no_avisa_si_todo_se_descargo_a_la_vez():
+    """El caso normal: nombres con tres fechas distintas (XLSX con la de descarga,
+    JSON con la del volcado del MAPA, PDF sin fecha) pero una sola sesion de
+    descarga. Comparando nombres esto avisaba siempre."""
+    tmp = tempfile.mkdtemp()
+    try:
+        paths = [_tocar(tmp, "ProductosAutorizados-30_07_2026.xlsx"),
+                 _tocar(tmp, "ProductosAutorizados_2026_07_27.json"),
+                 _tocar(tmp, "dc_web.pdf")]
+        assert avisar_desincronizacion(paths) is False
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_avisa_si_una_fuente_es_de_otra_descarga():
+    tmp = tempfile.mkdtemp()
+    try:
+        paths = [_tocar(tmp, "ProductosAutorizados-30_07_2026.xlsx"),
+                 _tocar(tmp, "ProductosCancelados-30_07_2026.xlsx"),
+                 _tocar(tmp, "ProductosRetirados-20_07_2026.xlsx", antiguedad_h=240)]
+        assert avisar_desincronizacion(paths) is True
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_los_pdf_tambien_cuentan():
+    """Con el criterio del nombre los PDF quedaban fuera de toda vigilancia."""
+    tmp = tempfile.mkdtemp()
+    try:
+        paths = [_tocar(tmp, "ProductosAutorizados-30_07_2026.xlsx"),
+                 _tocar(tmp, "dc_web.pdf", antiguedad_h=240)]
+        assert avisar_desincronizacion(paths) is True
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_red_secundaria_por_nombre_si_el_mtime_engana():
+    """Copiar ficheros pone el mtime a la hora de la copia y borra la senal. Si las
+    fechas de los nombres se separan mas de una semana, eso ya no lo explica el
+    desfase estructural entre JSON y XLSX: avisa igual."""
+    tmp = tempfile.mkdtemp()
+    try:
+        paths = [_tocar(tmp, "ProductosAutorizados-30_07_2026.xlsx"),
+                 _tocar(tmp, "ProductosCancelados-01_06_2026.xlsx")]
+        assert avisar_desincronizacion(paths) is True
+    finally:
+        shutil.rmtree(tmp)
+
+
+def test_una_sola_fuente_nunca_desfasa():
+    tmp = tempfile.mkdtemp()
+    try:
+        assert avisar_desincronizacion([_tocar(tmp, "dc_web.pdf")]) is False
     finally:
         shutil.rmtree(tmp)
 
