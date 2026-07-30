@@ -47,12 +47,49 @@ comprueba('dataUrlABytes decodifica base64 tras la coma', () => {
   igual(new TextDecoder().decode(u8), 'Hola');
 });
 
-comprueba('zipStore produce un Blob con la firma PK', async () => {
+comprueba('zipStore produce un Blob con la firma PK', () => {
   const blob = api.zipStore([
     { nombre: 'a.txt', datos: new TextEncoder().encode('hola'), fecha: new Date(2026, 6, 30, 12, 34, 56) }
   ]);
   igual(blob.type, 'application/zip');
   if (blob.size < 22) throw new Error('demasiado pequeno: ' + blob.size);
+});
+
+/* csvTexto vive en otro bloque de index.html, con sus propias dependencias (LOG,
+   fmtDate, pad). Se extrae igual y se le inyecta un LOG de mentira. */
+const bloqueCsv = html.match(/\/\* --- csv: inicio --- \*\/([\s\S]*?)\/\* --- csv: fin --- \*\//);
+if (!bloqueCsv) throw new Error('No encuentro el bloque "csv" en index.html');
+
+const csvApi = new Function('LOG', `
+  function pad(n){return(n<10?'0':'')+n;}
+  function fmtDate(d){ if(!d) return '—'; var p=function(n){return(n<10?'0':'')+n;};
+    return p(d.getDate())+'/'+p(d.getMonth()+1)+'/'+d.getFullYear(); }
+  ${bloqueCsv[1]}
+  return csvTexto;
+`);
+
+const LOG_FALSO = [
+  { ts: Date.UTC(2026, 6, 30, 10, 0), nreg: '25.123', nombre: 'GLIFOMAX', titular: 'T1', estado: 'EN VIGOR', decisive: '01/03/2030', note: '', foto: true, id: 'e2' },
+  { ts: Date.UTC(2026, 6, 29, 9, 0), nreg: '—', nombre: 'sin;punto,coma', titular: '', estado: 'NO ENCONTRADO', decisive: '', note: 'con "comillas"', foto: false, id: 'e1' }
+];
+
+comprueba('csvTexto sin rutas escribe si/no', () => {
+  const txt = csvApi(LOG_FALSO)(null);
+  const filas = txt.split('\r\n');
+  igual(filas[0].charCodeAt(0), 0xFEFF, 'falta el BOM');
+  if (!filas[1].endsWith(';no')) throw new Error('la entrada vieja deberia acabar en ;no -> ' + filas[1]);
+  if (!filas[2].endsWith(';sí')) throw new Error('la nueva deberia acabar en ;sí -> ' + filas[2]);
+});
+
+comprueba('csvTexto con rutas escribe la ruta', () => {
+  const txt = csvApi(LOG_FALSO)({ e2: 'fotos/0002_25.123.jpg' });
+  if (txt.indexOf('fotos/0002_25.123.jpg') === -1) throw new Error('no aparece la ruta');
+});
+
+comprueba('csvTexto entrecomilla lo que lleva separador', () => {
+  const txt = csvApi(LOG_FALSO)(null);
+  if (txt.indexOf('"sin;punto,coma"') === -1) throw new Error('no entrecomilla el punto y coma');
+  if (txt.indexOf('""comillas""') === -1) throw new Error('no duplica las comillas internas');
 });
 
 /* El artefacto se deja escrito para que verifica_zip.py lo abra con una

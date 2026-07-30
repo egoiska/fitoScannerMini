@@ -850,16 +850,16 @@ function saveLog(){ try{ localStorage.setItem(LOGKEY, JSON.stringify(LOG)); }cat
 function loadLog(){ try{ var s=localStorage.getItem(LOGKEY); if(s) LOG=JSON.parse(s)||[]; }catch(e){ LOG=[]; } updateBadge(); }
 
 /* --- zip: inicio --- */
-/* Generador de ZIP minimo, metodo 0 (almacenado, sin comprimir). Las fotos ya son
-   JPEG y el CSV pesa kilobytes, asi que deflate no aportaria nada y obligaria a
-   meter la unica pieza realmente delicada del formato. Sin ZIP64: el formato
-   clasico admite 65.535 entradas y 4 GB, y un registro de almacen no se acerca.
-   Los nombres se sanean a ASCII (saneaNombre), asi que no hace falta la bandera
+/* Generador de ZIP mínimo, método 0 (almacenado, sin comprimir). Las fotos ya son
+   JPEG y el CSV pesa kilobytes, así que deflate no aportaría nada y obligaría a
+   meter la única pieza realmente delicada del formato. Sin ZIP64: el formato
+   clásico admite 65.535 entradas y 4 GB, y un registro de almacén no se acerca.
+   Los nombres se sanean a ASCII (saneaNombre), así que no hace falta la bandera
    de UTF-8 del bit 11.
    Ojo: scripts/tests/test_zip.mjs localiza este bloque por estos marcadores. */
 var CRC_TABLA=null;
 function crc32(u8){
-  if(!CRC_TABLA){                       // se construye en la primera exportacion, no al arrancar
+  if(!CRC_TABLA){                       // se construye en la primera exportación, no al arrancar
     CRC_TABLA=new Uint32Array(256);
     for(var n=0;n<256;n++){ var c=n;
       for(var k=0;k<8;k++){ c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); }
@@ -916,14 +916,54 @@ function zipStore(entradas){
 /* --- zip: fin --- */
 
 function download(name,text,mime){ var blob=new Blob([text],{type:mime}), url=URL.createObjectURL(blob); var a=el('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); },100); }
-function exportCsv(){
-  if(!LOG.length){ toast('No hay nada que exportar'); return; }
+/* --- csv: inicio --- */
+/* rutas: mapa id -> ruta del fichero dentro del ZIP. Sin él (exportación suelta)
+   la columna Foto vuelve a sí/no, porque ahí no hay ficheros a los que apuntar.
+   Ojo: scripts/tests/test_zip.mjs localiza este bloque por estos marcadores. */
+function csvTexto(rutas){
   var rows=[['Fecha','Hora','N registro','Producto','Titular','Veredicto','Fecha limite','Nota','Foto']];
-  LOG.slice().reverse().forEach(function(e){ var d=new Date(e.ts); rows.push([fmtDate(d), pad(d.getHours())+':'+pad(d.getMinutes()), e.nreg, e.nombre, e.titular, e.estado, e.decisive||'', e.note||'', e.foto?'sí':'no']); });
-  var csv='\uFEFF'+rows.map(function(r){ return r.map(function(c){ c=String(c==null?'':c); return /[";,\n]/.test(c)?'"'+c.replace(/"/g,'""')+'"':c; }).join(';'); }).join('\r\n');
-  download('auditoria_fitos_'+stamp()+'.csv', csv, 'text/csv;charset=utf-8');
+  LOG.slice().reverse().forEach(function(e){
+    var d=new Date(e.ts);
+    var foto=rutas ? (rutas[e.id]||'') : (e.foto?'sí':'no');
+    rows.push([fmtDate(d), pad(d.getHours())+':'+pad(d.getMinutes()), e.nreg, e.nombre,
+               e.titular, e.estado, e.decisive||'', e.note||'', foto]);
+  });
+  return '\uFEFF'+rows.map(function(r){
+    return r.map(function(c){ c=String(c==null?'':c);
+      return /[";,\n]/.test(c)?'"'+c.replace(/"/g,'""')+'"':c;
+    }).join(';');
+  }).join('\r\n');
 }
-function exportJson(){ if(!LOG.length){ toast('No hay nada que exportar'); return; }
+/* --- csv: fin --- */
+
+function exportCsv(){ download('auditoria_fitos_'+stamp()+'.csv', csvTexto(null), 'text/csv;charset=utf-8'); }
+
+/* El ZIP lleva el CSV más una carpeta fotos/. El número del nombre de cada foto es
+   su número de fila en el CSV, así que además de por la columna Foto se pueden
+   correlacionar por posición. Una entrada marcada con foto cuya imagen no aparezca
+   -registro restaurado en otro móvil, o IndexedDB purgado por el sistema- se trata
+   como sin foto en vez de romper la exportación. */
+function exportZip(){
+  showBusy('Preparando el ZIP…');
+  allPhotos().then(function(all){
+    var rutas={}, entradas=[];
+    LOG.slice().reverse().forEach(function(e,i){
+      if(!e.foto || !all[e.id]) return;
+      var nom='fotos/'+pad4(i+1)+'_'+saneaNombre(e.nreg)+'.jpg';
+      rutas[e.id]=nom;
+      entradas.push({nombre:nom, datos:dataUrlABytes(all[e.id]), fecha:new Date(e.ts)});
+    });
+    var sello=stamp(), fotos=entradas.length;
+    entradas.unshift({nombre:'auditoria_fitos_'+sello+'.csv',
+                      datos:new TextEncoder().encode(csvTexto(rutas)), fecha:new Date()});
+    // download() envuelve lo que reciba en un Blob, y new Blob([blob]) es válido:
+    // así la descarga se hace en un solo sitio para los tres formatos.
+    download('auditoria_fitos_'+sello+'.zip', zipStore(entradas), 'application/zip');
+    hideBusy();
+    toast(fotos?(fotos+' foto'+(fotos===1?'':'s')+' en el ZIP'):'ZIP sin fotos');
+  }).catch(function(){ hideBusy(); toast('No se pudo generar el ZIP'); });
+}
+function exportJson(){
   allPhotos().then(function(all){
     var comps=LOG.slice().reverse().map(function(e){ var o={}; for(var k in e){ if(k!=='foto') o[k]=e[k]; } if(e.foto&&all[e.id]) o.foto_base64=all[e.id]; return o; });
     download('auditoria_fitos_'+stamp()+'.json', JSON.stringify({generado:new Date().toISOString(), total:LOG.length, comprobaciones:comps},null,2), 'application/json');
